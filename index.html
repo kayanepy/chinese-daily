@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Китайский каждый день</title>
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23c8102e'/><text x='50' y='72' font-size='62' text-anchor='middle' fill='white'>中</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand"><span class="logo">中</span> Китайский каждый день</a>
+    <span><a href="#/dict" class="icon-btn" aria-label="Словарь">🔎</a><a href="#/settings" class="icon-btn" aria-label="Настройки">⚙️</a></span>
+  </header>
+
+  <main id="app" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Разделы">
+    <a href="#/" data-tab="home"><span>🏠</span>Главная</a>
+    <a href="#/learn" data-tab="learn"><span>🃏</span>Учить</a>
+    <a href="#/review" data-tab="review"><span>✍️</span>Повтор</a>
+    <a href="#/phrases" data-tab="phrases"><span>💬</span>Фразы</a>
+    <a href="#/tones" data-tab="tones"><span>🎵</span>Тоны</a>
+    <a href="#/grammar" data-tab="grammar"><span>📘</span>Грамматика</a>
+  </nav>
+
+  <script src="data.js"></script>
+  <script src="data-hsk34.js"></script>
+  <script src="examples.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
