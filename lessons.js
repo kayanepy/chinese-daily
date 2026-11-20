@@ -58,6 +58,7 @@ function bar(part, total, part2) {
 function renderLessons(arg) {
   if (arg && /^\d+$/.test(arg)) return startLesson(+arg);
   if (arg && /^i\d+$/.test(arg)) return renderLessonInfo(+arg.slice(1));
+  if (arg && /^f\d+$/.test(arg)) return startLesson(+arg.slice(1), true);
   if (arg === 'go' && ls) return drawLesson();
   const c = course();
   const next = nextLesson();
@@ -90,7 +91,7 @@ function renderLessons(arg) {
           return `<a href="#/lessons/i${x.n}" class="lesson-row ${s2 ? 'done' : ''} ${x === next ? 'cur' : ''}">
             <b class="num">${x.num}${x.part ? '<small>.' + x.part + '</small>' : ''}</b>
             <span class="t"><span class="hz">${esc(x.zh)}</span><small>${esc(x.ru)}</small><small class="topics">${x.gram.map((g) => esc(g.t.split(' — ')[0])).join(' · ')}</small></span>
-            <span class="st">${s2 ? '✓ ' + s2.score + '%' : x === next ? '▶ далее' : ''}</span></a>`;
+            <span class="st">${s2 ? '✓ ' + s2.score + '%' + (lessonGaps(x) ? '<small class="fixme">доделать</small>' : '') : x === next ? '▶ далее' : ''}</span></a>`;
         }).join('')}</div></details>`;
     }).join('')}`;
 }
@@ -109,7 +110,8 @@ function renderLessonInfo(n) {
       <h1 style="margin:4px 0 0"><span class="hz">${esc(L.zh)}</span> ${playBtn(L.zh)}</h1>
       <div class="muted">${esc(L.ru)}</div>
       <div style="margin-top:10px">${st ? `<span class="pill ok">✓ Пройден ${dayLabel(st.date).toLowerCase()} · ${st.score}% · слова ${st.quiz} · домашка ${st.hw}${st.speak != null ? ` · произношение ${st.speak}%` : ''}</span>` : '<span class="pill">Ещё не пройден</span>'}</div>
-      <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">${st ? 'Пройти ещё раз' : 'Начать урок'} →</a>
+      ${lessonGaps(L) ? `<a class="btn primary big" href="#/lessons/f${L.n}" style="margin-top:12px">🛠 Доделать: ${gapsLabel(lessonGaps(L))}</a>` : ''}
+      <a class="btn ${lessonGaps(L) ? '' : 'primary'} big" href="#/lessons/${L.n}" style="margin-top:${lessonGaps(L) ? 8 : 12}px">${st ? 'Пройти ещё раз' : 'Начать урок'} →</a>
       <button class="btn" id="rvl" style="margin-top:8px;width:100%">🔁 Повторить слова этого урока</button>
     </div>
     <div class="card">
@@ -130,13 +132,37 @@ function renderLessonInfo(n) {
   document.getElementById('rvl').onclick = () => startReview({ name: `${lessonName(L)} · ${L.zh}`, words: words });
 }
 
+/* ---------- Доделать урок: только то, что не получилось ---------- */
+function frac(s) { const [a, b] = String(s || '0/0').split('/').map(Number); return [a || 0, b || 0]; }
+function lessonGaps(L) {
+  const st = lessonState(L); if (!st) return null;
+  const [qa, qb] = frac(st.quiz), [ha, hb] = frac(st.hw);
+  const q = qb - qa, h = hb - ha;
+  return q > 0 || h > 0 ? { q, h } : null;
+}
+function gapsLabel(g) { return [g.q ? `слова ${g.q}` : '', g.h ? `домашка ${g.h}` : ''].filter(Boolean).join(', '); }
+function setupFix() {
+  const L = ls.L, st = lessonState(L), g = lessonGaps(L) || { q: 0, h: 0 };
+  const fx = st.fix || {};
+  // Слова: сохранённые ошибки, иначе — слова урока из «Ошибок», иначе — случайные.
+  let q = (fx.quiz || []).filter((id) => L.ids.includes(id));
+  if (!fx.quiz) {
+    q = (S.mistakes || []).filter((id) => L.ids.includes(id)).slice(0, g.q);
+    q = [...q, ...shuffle(L.ids.filter((id) => !q.includes(id)))].slice(0, g.q);
+  }
+  // Домашка: сохранённые невыполненные задания, иначе — новые задания того же урока.
+  const hw = fx.hw ? fx.hw.map((t) => ({ ...t, picked: [], pool: null, chosen: undefined, played: false })) : makeHomework(L).slice(0, g.h);
+  Object.assign(ls, { fix: { qa: frac(st.quiz)[0], qb: frac(st.quiz)[1], ha: frac(st.hw)[0], hb: frac(st.hw)[1] }, quiz: shuffle(q), hw, step: q.length ? STEP.quiz : STEP.hw });
+}
+function cleanTask(t) { const { picked, pool, chosen, played, ...rest } = t; return rest; }
+
 /* ---------- Прохождение урока ---------- */
 let ls = null;
 const STEPS = [
   ['words', '📖 Слова'], ['dialog', '💬 Диалог'], ['grammar', '📘 Грамматика'], ['tones', '🎵 Тоны'], ['speak', '🎤 Произношение'], ['quiz', '✍️ Проверка слов'], ['hw', '📝 Домашка'], ['done', '🏁 Итог'],
 ];
 const STEP = Object.fromEntries(STEPS.map(([k], i) => [k, i]));
-function startLesson(n) {
+function startLesson(n, fix) {
   const L = course()[n - 1];
   if (!L) { location.hash = '#/lessons'; return; }
   const words = L.ids.map((id) => WORD_BY_ID[id]);
@@ -145,8 +171,10 @@ function startLesson(n) {
     tones: makeToneQs(words), toneRight: 0,
     speak: makeSpeakQs(L, words), speakSkipped: false,
     quiz: shuffle(words.map((w) => w.id)), quizRight: 0, quizWrong: [], tries: 0, state: 'ask', retried: {},
-    hw: makeHomework(L), hwRight: 0, hwState: null, errLog: [],
+    hw: makeHomework(L), hwRight: 0, hwState: null, errLog: [], hwFailed: [],
   };
+  if (fix) setupFix();
+  ls.qN = ls.quiz.length;
   location.hash = '#/lessons/go';
 }
 function stepBar() {
@@ -346,7 +374,7 @@ function lsQuiz(head) {
   if (!ls.quiz.length) return goStep(STEP.hw);
   const w = WORD_BY_ID[ls.quiz[0]];
   const done = ls.state !== 'ask';
-  const total = ls.words.length;
+  const total = ls.qN;
   app.innerHTML = `${head}
     <div class="progress"><div style="width:${((total - ls.quiz.length) / total) * 100}%"></div></div>
     <div class="card flash">
@@ -493,7 +521,8 @@ function lsHomework(head) {
   if (t.type === 'listen' && !answered && !t.played) { t.played = true; speak(t.ex[0]); }
   const finish = (ok, your) => {
     ls.hwState = ok; if (ok) ls.hwRight++;
-    else ls.errLog.push({ what: { order: 'Порядок слов', gap: 'Пропуск', listen: 'Аудирование', pick: 'Перевод' }[t.type], your, right: t.type === 'listen' ? t.ex[2] : t.ex[0], py: t.type === 'listen' ? '' : t.ex[1], ru: t.type === 'listen' ? t.ex[0] : '', diff: t.type === 'gap', toks: t.type === 'order' ? t.picked.map((p) => p.c) : null, chunks: t.chunks });
+    else ls.hwFailed.push(cleanTask(t));
+    if (!ok) ls.errLog.push({ what: { order: 'Порядок слов', gap: 'Пропуск', listen: 'Аудирование', pick: 'Перевод' }[t.type], your, right: t.type === 'listen' ? t.ex[2] : t.ex[0], py: t.type === 'listen' ? '' : t.ex[1], ru: t.type === 'listen' ? t.ex[0] : '', diff: t.type === 'gap', toks: t.type === 'order' ? t.picked.map((p) => p.c) : null, chunks: t.chunks });
     drawLesson(); speak(t.ex[0]);
   };
   app.querySelectorAll('[data-pk]').forEach((b) => { b.onclick = () => { t.picked.push(t.pool[+b.dataset.pk]); drawLesson(); }; });
@@ -517,25 +546,33 @@ function errRow(e) {
     <div>Правильно: <span class="${hz ? 'hz ' : ''}diff">${hz ? d.t : esc(e.right)}</span>${e.py ? ` <span class="py small">${colorPinyin(e.py)}</span>` : ''}${e.ru ? ` <span class="hz small">${esc(e.ru)}</span>` : ''}</div></div>`;
 }
 function lsDone(head) {
-  const qTotal = ls.words.length || 1, hTotal = ls.hw.length || 1;
-  const score = Math.round(((ls.quizRight / qTotal) * 0.5 + (ls.hwRight / hTotal) * 0.5) * 100);
+  const f = ls.fix;
+  const qR = f ? f.qa + ls.quizRight : ls.quizRight, qT = f ? f.qb : ls.words.length;
+  const hR = f ? f.ha + ls.hwRight : ls.hwRight, hT = f ? f.hb : ls.hw.length;
+  const score = Math.round(((qR / (qT || 1)) * 0.5 + (hR / (hT || 1)) * 0.5) * 100);
   if (!ls.saved) {
     S.course = S.course || {};
     const prev = S.course[ls.L.key];
-    S.course[ls.L.key] = { date: todayKey(), score: Math.max(score, prev ? prev.score : 0), quiz: `${ls.quizRight}/${ls.words.length}`, hw: `${ls.hwRight}/${ls.hw.length}`, speak: speakAvg() != null ? Math.max(speakAvg(), (prev && prev.speak) || 0) : (prev ? prev.speak : undefined) };
+    const better = !prev || score >= prev.score;
+    const rec = better ? { date: todayKey(), score, quiz: `${qR}/${qT}`, hw: `${hR}/${hT}` } : { ...prev };
+    if (better) rec.fix = { quiz: [...ls.quizWrong], hw: ls.hwFailed };
+    const sp = speakAvg(); rec.speak = sp != null ? Math.max(sp, (prev && prev.speak) || 0) : (prev ? prev.speak : undefined);
+    S.course[ls.L.key] = rec;
     save(); ls.saved = true;
   }
+  const gaps = lessonGaps(ls.L);
   const wrong = ls.quizWrong.map((id) => WORD_BY_ID[id]);
   const next = course()[ls.L.n];
   app.innerHTML = `${head}
     <div class="card empty">
       <div class="big-emoji">${score >= 80 ? '🎉' : score >= 50 ? '👍' : '💪'}</div>
-      <h2>${lessonName(ls.L)} пройден — ${score}%</h2>
-      <p>Слова с первой попытки: <b>${ls.quizRight}/${ls.words.length}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}${speakAvg() != null ? ` · Произношение: <b>${speakAvg()}%</b>` : ''}</p>
+      <h2>${lessonName(ls.L)} ${f ? 'доделан' : 'пройден'} — ${score}%</h2>
+      <p>Слова с первой попытки: <b>${qR}/${qT}</b> · Домашка: <b>${hR}/${hT}</b>${f || ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}${speakAvg() != null ? ` · Произношение: <b>${speakAvg()}%</b>` : ''}</p>
       ${ls.errLog.length ? `<details class="gram err-log" open><summary>Где были ошибки (${ls.errLog.length})</summary><div class="inner">${ls.errLog.map(errRow).join('')}</div></details>` : ''}
       ${wrong.length ? `<p class="muted small">Повторите: ${wrong.map((w) => `<span class="hz">${esc(w.hz)}</span> (${esc(w.ru)})`).join(', ')}. Эти слова придут в карточки раньше.</p>` : ''}
       <p class="muted small">Слова урока добавлены в карточки — завтра загляните в «Карточки», чтобы их повторить. Перед следующим уроком перечитайте диалог вслух.</p>
       <div class="row" style="justify-content:center">
+        ${gaps ? `<a class="btn primary" href="#/lessons/f${ls.L.n}">🛠 Доделать ошибки (${gapsLabel(gaps)})</a>` : ''}
         <button class="btn" id="redo">Пройти ещё раз</button>
         ${next ? `<a class="btn primary" href="#/lessons/${next.n}">Следующий урок →</a>` : ''}
       </div>
