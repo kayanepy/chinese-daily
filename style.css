@@ -302,3 +302,46 @@ details.path[open] > summary b::after { content: ' ▴'; }
 .err-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .err-row:last-child { border-bottom: 0; }
 .lesson-row .st .fixme { display: block; color: var(--bad); font-size: 11px; text-align: right; }
+
+/* ---------- Режим занятия (урок, повтор, карточки) ---------- */
+.focus-exit { display: none; font-weight: 600; text-decoration: none; padding: 6px 12px; border-radius: 99px; background: var(--surface-2); color: var(--text); font-size: 14px; }
+body.focus .topbar .tools { display: none; }
+body.focus .focus-exit { display: inline-block; }
+body.focus .tabbar { display: none; }
+body.focus { padding-bottom: env(safe-area-inset-bottom); }
+@media (min-width: 900px) { body.focus { padding-left: 0; } }
+.actions:empty { display: none; }
+body.focus .actions {
+  position: sticky; bottom: 0; z-index: 4;
+  margin: 0 -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, transparent, var(--bg) 22%);
+}
+body.focus .actions .grades { margin: 0; }
+.actions > .btn.big { width: 100%; margin: 0; }
+
+/* Шаги урока: сегменты + название */
+.lesson-head { margin: -4px 0 6px; }
+.stepper { margin-bottom: 14px; }
+.segs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.segs button { height: 6px; padding: 0; border: 0; border-radius: 99px; background: var(--surface-2); cursor: default; }
+.segs button.ok { background: color-mix(in srgb, var(--ok) 70%, transparent); }
+.segs button.on { background: var(--accent); }
+.segs button[data-go] { cursor: pointer; height: 6px; box-shadow: 0 0 0 6px transparent; }
+.step-name { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; font-size: 17px; }
+
+/* Ввод ответа: «Проверить» шире, чем «Не помню» */
+.row:has(> #check) { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+.row:has(> #check) .btn { width: 100%; white-space: nowrap; padding-left: 8px; padding-right: 8px; }
+
+/* Главная */
+.due-card { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); }
+.due-card .ic { font-size: 28px; }
+.due-card b { display: block; }
+.due-card small { color: var(--muted); }
+.due-card .go { margin-left: auto; font-size: 22px; color: var(--accent); }
+.done-line { margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--ok-soft); color: var(--ok); font-size: 14px; font-weight: 600; }
+.install-card { position: relative; padding-right: 40px; }
+.install-card .close { position: absolute; top: 8px; right: 8px; border: 0; background: none; color: var(--muted); font-size: 16px; padding: 6px; cursor: pointer; }
+details.howto summary { cursor: pointer; list-style: none; }
+details.howto summary::after { content: ' ▾'; color: var(--muted); }
+details.howto[open] summary::after { content: ' ▴'; }

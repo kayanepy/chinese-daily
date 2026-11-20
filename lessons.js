@@ -143,7 +143,7 @@ function lessonGaps(L) {
 function gapsLabel(g) { return [g.q ? `слова ${g.q}` : '', g.h ? `домашка ${g.h}` : ''].filter(Boolean).join(', '); }
 function setupFix() {
   const L = ls.L, st = lessonState(L), g = lessonGaps(L) || { q: 0, h: 0 };
-  const fx = st.fix || {};
+  const fx = st.fix && (st.fix.quiz.length + st.fix.hw.length) >= g.q + g.h ? st.fix : {};
   // Слова: сохранённые ошибки, иначе — слова урока из «Ошибок», иначе — случайные.
   let q = (fx.quiz || []).filter((id) => L.ids.includes(id));
   if (!fx.quiz) {
@@ -178,14 +178,17 @@ function startLesson(n, fix) {
   location.hash = '#/lessons/go';
 }
 function stepBar() {
-  return `<div class="steps">${STEPS.map(([, name], i) => `<span class="${i < ls.step ? 'ok' : i === ls.step ? 'on' : ''}">${i === ls.step ? name : name.split(' ')[0]}</span>`).join('')}</div>`;
+  const canGo = (i) => !ls.fix && i < ls.step && i <= STEP.grammar;
+  return `<div class="stepper"><div class="segs">${STEPS.map(([k, name], i) => `<button class="${i < ls.step ? 'ok' : i === ls.step ? 'on' : ''}" ${canGo(i) ? `data-go="${i}"` : 'tabindex="-1"'} aria-label="${esc(name)}" title="${esc(name)}"></button>`).join('')}</div>
+    <div class="step-name"><b>${STEPS[ls.step][1]}</b><span class="muted small">шаг ${ls.step + 1} из ${STEPS.length}</span></div></div>`;
 }
 function goStep(s) { ls.step = s; ls.i = 0; drawLesson(); window.scrollTo(0, 0); }
 function drawLesson() {
   if (!ls) { location.hash = '#/lessons'; return; }
   const key = STEPS[ls.step][0];
-  const head = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><a href="#/lessons" class="small">← Уроки</a><b class="small">${lessonName(ls.L)}</b></div>${stepBar()}`;
+  const head = `<div class="lesson-head"><span class="small muted">${lessonName(ls.L)}${ls.fix ? ' · доделываем ошибки' : ''}</span></div>${stepBar()}`;
   ({ words: lsWords, dialog: lsDialog, grammar: lsGrammar, tones: lsTones, speak: lsSpeak, quiz: lsQuiz, hw: lsHomework, done: lsDone })[key](head);
+  app.querySelectorAll('.segs [data-go]').forEach((b) => { b.onclick = () => goStep(+b.dataset.go); });
 }
 function exampleBox(ex, title) {
   return ex ? `<div class="example">${title ? `<div class="small muted">${title}</div>` : ''}<div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : '';
@@ -205,7 +208,6 @@ function speakQueue(texts) {
 function lsWords(head) {
   const w = ls.words[ls.i];
   app.innerHTML = `${head}
-    <div class="progress"><div style="width:${(ls.i / ls.words.length) * 100}%"></div></div>
     <div class="card flash">
       <span class="deck-tag" style="align-self:center">${ls.i + 1} / ${ls.words.length} · ${DECKS[w.deck].name}</span>
       <div class="hz">${esc(w.hz)}</div>
@@ -216,7 +218,7 @@ function lsWords(head) {
       ${exampleBox(exampleFor(w), 'Пример')}
       <p class="hint">Повторите вслух 2–3 раза${SR ? ', затем нажмите 🎤 и скажите слово — сайт проверит произношение' : ''}.</p>
     </div>
-    <div class="row">
+    <div class="row actions">
       ${ls.i ? '<button class="btn" id="prev">← Назад</button>' : ''}
       <button class="btn primary" id="next" style="flex:1">${ls.i < ls.words.length - 1 ? 'Дальше →' : 'К диалогу →'}</button>
     </div>`;
@@ -246,7 +248,7 @@ function lsDialog(head) {
       ${d.map((x, k) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div>${ls.showPy ? `<div class="py">${colorPinyin(x[2])}</div>` : ''}<div class="ru ${ls.showRu ? '' : 'blur'}">${esc(x[3])}</div><div class="rec-result" id="dr${k}"></div></div><div class="tools">${playBtn(x[1])}${SR ? `<button class="play" data-mic="${k}" title="Проверить произношение">🎤</button>` : ''}</div></div>`).join('')}
       <p class="hint">Сначала послушайте, не глядя в перевод: сколько поняли? Затем нажмите на перевод (или «Показать перевод»), проверьте себя и прочитайте каждую реплику вслух${SR ? ' — кнопка 🎤 проверит, как вы её произнесли' : ''}.</p>
     </div>
-    <div class="row"><button class="btn" id="prev">← Слова</button><button class="btn primary" id="next" style="flex:1">К грамматике →</button></div>`;
+    <div class="row actions"><button class="btn" id="prev">← Слова</button><button class="btn primary" id="next" style="flex:1">К грамматике →</button></div>`;
   document.getElementById('all').onclick = () => speakQueue(d.map((x) => x[1]));
   document.getElementById('tpy').onclick = () => { ls.showPy = !ls.showPy; drawLesson(); };
   document.getElementById('tru').onclick = () => { ls.showRu = !ls.showRu; drawLesson(); };
@@ -266,7 +268,7 @@ function lsGrammar(head) {
       ${g.ex.map((e) => `<div class="phrase"><div class="body"><div class="hz">${esc(e[0])}</div><div class="py">${colorPinyin(e[1])}</div><div class="ru">${esc(e[2])}</div></div><div class="tools">${playBtn(e[0])}</div></div>`).join('')}
     </div>`).join('')}
     <p class="hint">Прослушайте примеры и повторите их вслух. В конце урока будет домашнее задание по этим темам.</p>
-    <div class="row"><button class="btn" id="prev">← Диалог</button><button class="btn primary" id="next" style="flex:1">К тонам →</button></div>`;
+    <div class="row actions"><button class="btn" id="prev">← Диалог</button><button class="btn primary" id="next" style="flex:1">К тонам →</button></div>`;
   document.getElementById('prev').onclick = () => goStep(STEP.dialog);
   document.getElementById('next').onclick = () => goStep(STEP.tones);
 }
@@ -303,7 +305,7 @@ function lsTones(head) {
       }).join('')}</div>
       ${q.chosen ? `<div style="margin-top:12px"><span class="hz" style="font-size:30px">${esc(q.w.hz)}</span> <span class="py">${colorPinyin(q.w.py)}</span> — ${esc(q.w.ru)}</div>` : ''}
     </div>
-    <div class="row">
+    <div class="row actions">
       <button class="btn" id="skip">Пропустить тоны</button>
       ${q.chosen ? `<button class="btn primary" id="next" style="flex:1">${ls.i < ls.tones.length - 1 ? 'Дальше →' : 'К произношению →'}</button>` : ''}
     </div>`;
@@ -340,7 +342,6 @@ function lsSpeak(head) {
   const q = ls.speak[ls.i];
   const last = ls.i === ls.speak.length - 1;
   app.innerHTML = `${head}
-    <div class="progress"><div style="width:${(ls.i / ls.speak.length) * 100}%"></div></div>
     <div class="card flash">
       <span class="deck-tag" style="align-self:center">${ls.i + 1} / ${ls.speak.length} · ${q.line ? 'реплика из диалога' : 'слово'}</span>
       <div class="hz" ${q.line ? 'style="font-size:30px"' : ''}>${esc(q.hz)}</div>
@@ -350,12 +351,13 @@ function lsSpeak(head) {
       <button class="btn primary big" id="mic" style="margin-top:10px">🎤 ${q.best != null ? 'Ещё раз' : 'Нажмите и скажите'}</button>
       <div id="recres" class="rec-result" style="text-align:center"></div>
       ${q.best != null ? `<div class="small muted" style="text-align:center">Лучший результат: <b>${q.best}%</b></div>` : ''}
+      ${ls.i === 0 && q.best == null ? '<p class="hint">Послушайте образец, нажмите 🎤 и скажите вслух. 80% и выше — отлично. Если распознаётся не то, говорите чуть медленнее и чётче выделяйте тоны.</p>' : ''}
     </div>
-    <div class="row">
-      <button class="btn" id="skip">Пропустить произношение</button>
-      <button class="btn ${q.best != null ? 'primary' : ''}" id="next" style="flex:1">${last ? 'К проверке слов →' : q.best != null ? 'Дальше →' : 'Пропустить →'}</button>
+    <div class="row actions">
+      <button class="btn" id="skip">Пропустить шаг</button>
+      <button class="btn ${q.best != null ? 'primary' : ''}" id="next" style="flex:1">${last ? 'К проверке слов →' : q.best != null ? 'Дальше →' : 'Следующее →'}</button>
     </div>
-    <p class="hint">Послушайте образец, нажмите 🎤 и скажите вслух. 80% и выше — отлично. Если сервис распознал не то, попробуйте говорить чуть медленнее и чётче выделять тоны.</p>`;
+`;
   const mic = document.getElementById('mic');
   mic.onclick = () => micCheck(q.hz, document.getElementById('recres'), mic, (pct) => {
     const first = q.best == null;
@@ -378,7 +380,7 @@ function lsQuiz(head) {
   app.innerHTML = `${head}
     <div class="progress"><div style="width:${((total - ls.quiz.length) / total) * 100}%"></div></div>
     <div class="card flash">
-      <div class="muted small">Напишите по-китайски${S.settings.hanziOnly ? ' иероглифами (наберите пиньинь на китайской клавиатуре и выберите иероглиф)' : ' (иероглифы или пиньинь, тоны необязательны)'}</div>
+      <div class="muted small">Напишите по-китайски</div>
       <div class="prompt">${esc(w.ru)}</div>
       ${done ? `
         <div class="answer ${ls.state === 'right' ? 'ok' : 'bad'}">${ls.state === 'right' ? '✅ Верно!' : '📖 Правильный ответ:'}</div>
@@ -390,9 +392,10 @@ function lsQuiz(head) {
       ` : `
         <input class="search answer-input" id="ans" lang="zh-CN" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ansPlaceholder()}">
         <div id="fb" class="rec-result bad">${ls.tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
-        <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>`}
+        <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>
+        <p class="hint">${ansHint()}</p>`}
     </div>
-    ${done ? '<button class="btn primary big" id="next">Дальше →</button>' : ''}`;
+    ${done ? '<div class="actions"><button class="btn primary big" id="next">Дальше →</button></div>' : ''}`;
   if (!done) {
     const inp = document.getElementById('ans'); inp.focus();
     const check = () => {
@@ -516,7 +519,7 @@ function lsHomework(head) {
   app.innerHTML = `${head}
     <div class="muted small" style="margin-bottom:6px">Домашнее задание · ${ls.i + 1} из ${ls.hw.length}</div>
     <div class="card">${body}${solution}</div>
-    <div class="row">${answered ? '<button class="btn primary big" id="next">Дальше →</button>'
+    <div class="row actions">${answered ? '<button class="btn primary big" id="next">Дальше →</button>'
       : t.type === 'order' ? `<button class="btn" id="reset">Сбросить</button><button class="btn primary" id="checkOrder" style="flex:1" ${t.picked.length === t.chunks.length ? '' : 'disabled'}>Проверить</button>` : ''}</div>`;
   if (t.type === 'listen' && !answered && !t.played) { t.played = true; speak(t.ex[0]); }
   const finish = (ok, your) => {

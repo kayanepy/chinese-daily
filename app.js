@@ -249,11 +249,17 @@ const routes = {
 function router() {
   const [, page = '', arg] = location.hash.split('/');
   document.querySelectorAll('.tabbar a').forEach((a) => a.classList.toggle('active', (a.dataset.tab === (page || 'home'))));
+  setFocus((page === 'lessons' || page === 'review') && arg === 'go', page === 'review' ? '#/review' : '#/lessons');
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   (routes[page] || renderHome)(arg);
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', router);
+// Режим занятия: прячем нижнее меню, кнопки действий прилипают к низу экрана, в шапке — «Выйти».
+function setFocus(on, exit) {
+  document.body.classList.toggle('focus', !!on);
+  const x = document.getElementById('focusExit'); if (x && exit) x.href = exit;
+}
 
 /* ---------- Главная ---------- */
 function renderHome() {
@@ -272,12 +278,11 @@ function renderHome() {
       <div class="card stat"><b>${learned}</b><span>слов в изучении</span></div>
     </div>
     ${nextLessonCard()}
-    <div class="card">
-      <h3>Повторение карточек</h3>
-      <p class="muted small" style="margin:0 0 12px">${due ? `К повторению: <b>${due}</b>. ` : ''}${nw ? `Новых слов: <b>${nw}</b>.` : ''}${!due && !nw ? 'Карточек на сегодня нет. Новые слова приходят из уроков.' : ''}</p>
-      <a href="#/learn" class="btn big">${due + nw ? 'Повторить карточки' : 'Открыть карточки'}</a>
-    </div>
-    ${isStandalone() ? '' : `<div class="card install-card">
+    ${due + nw ? `<a class="card due-card" href="#/learn">
+      <span class="ic">🃏</span><span><b>Карточки на сегодня: ${due + nw}</b><small>${due ? `повторить ${due}` : ''}${due && nw ? ' · ' : ''}${nw ? `новых ${nw}` : ''} · около ${Math.max(1, Math.round((due + nw) * 0.25))} мин</small></span><span class="go">→</span>
+    </a>` : `<div class="done-line">✅ Карточки на сегодня повторены</div>`}
+    ${isStandalone() || S.hideInstall ? '' : `<div class="card install-card">
+      <button class="close" id="hideInstall" aria-label="Скрыть">✕</button>
       <div><b>📲 Установить как приложение</b><div class="muted small">Будет открываться с главного экрана и работать без интернета — пригодится в Китае.</div></div>
       <button class="btn primary sm" id="installBtn" ${installPrompt ? '' : 'hidden'}>Установить</button>
       ${installPrompt ? '' : '<div class="muted small">Android (Chrome): меню ⋮ → «Добавить на главный экран» / «Установить приложение».</div>'}
@@ -291,15 +296,15 @@ function renderHome() {
       <a class="sit" href="#/grammar"><span class="ic">📘</span><b>Грамматика</b><small>${ALL_GRAMMAR.length} коротких тем, HSK 1–4</small></a>
       <a class="sit" href="#/dict"><span class="ic">🔎</span><b>Словарь</b><small>${ALL_WORDS.length} слов и фраз</small></a>
     </div>
-    <h2>Как заниматься</h2>
-    <div class="card small">
-      <ol style="margin:0;padding-left:20px">
-        <li>Каждый день 10–15 минут карточек: система сама покажет, что пора повторить.</li>
+    <details class="card small howto"><summary><b>Как заниматься</b></summary>
+      <ol style="margin:10px 0 0;padding-left:20px">
+        <li>Один урок за 1–2 дня: слова → диалог → грамматика → домашка. Всё, что не получилось, можно «Доделать».</li>
+        <li>Каждый день 5–10 минут карточек: система сама покажет, что пора повторить.</li>
         <li>Всё произносите <b>вслух</b>, даже если сидите один. Цель — говорить, а не узнавать.</li>
         <li>Перед ситуацией (аренда, банк, врач) откройте нужный раздел фраз и прогоните его с микрофоном 🎤.</li>
         <li>Раз в пару дней 5 минут тренажёра тонов: без тонов вас будут переспрашивать.</li>
       </ol>
-    </div>
+    </details>
     ${!('speechSynthesis' in window) || !voices.length ? '<div class="notice">Если звук не работает: нужен китайский голос в системе. На iPhone/Mac: Настройки → Универсальный доступ → Устно → Голоса → Китайский. На Android: установите «Синтез речи Google» и китайский язык.</div>' : ''}
   `;
 }
@@ -343,11 +348,14 @@ function renderLearn() {
   if (!session || !session.queue.length) startSession();
   if (!session.queue.length) {
     app.innerHTML = `<div class="card empty"><div class="big-emoji">🎉</div><h2>На сегодня всё!</h2>
-      <p class="muted">Повторение на сегодня закончено. Новые слова приходят из уроков.</p>
-      <div class="row" style="justify-content:center"><a class="btn" href="#/tones">Тренажёр тонов</a><a class="btn" href="#/phrases">Фразы</a><a class="btn" href="#/settings">Настройки</a></div></div>`;
+      <p class="muted">Повторение на сегодня закончено. Новые слова приходят из уроков — карточки с ними появятся завтра.</p>
+      <a class="btn primary big" href="#/lessons/${nextLesson().n}">Следующий урок →</a>
+      <div class="row" style="justify-content:center;margin-top:10px"><a class="btn" href="#/review">✍️ Свободный повтор</a><a class="btn" href="#/phrases">💬 Фразы</a><a class="btn" href="#/tones">🎵 Тоны</a></div></div>`;
     session = null;
+    setFocus(false);
     return;
   }
+  setFocus(true, '#/');
   const w = WORD_BY_ID[session.queue[0]];
   if (!session.mode) session.mode = cardMode(w);
   const mode = session.mode;
@@ -409,7 +417,7 @@ function renderTypeCard(w) {
       <span class="muted small">${session.queue.length} осталось</span>
     </div>
     <div class="card flash">
-      <div class="muted small">Напишите по-китайски (иероглифы или пиньинь, тоны необязательны)</div>
+      <div class="muted small">Напишите по-китайски</div>
       <div class="prompt">${esc(w.ru)}</div>
       ${done ? `
         <div class="answer ${st === 'right' ? 'ok' : 'bad'}">${st === 'right' ? (tries ? '✅ Верно, со второй попытки' : '✅ Верно!') : '📖 Правильный ответ:'}</div>
@@ -424,9 +432,9 @@ function renderTypeCard(w) {
         <div id="fb" class="rec-result bad">${tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
         <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>`}
     </div>
-    ${!done ? '' : st !== 'right' ? `<button class="btn primary big" data-tg="0">Дальше → <small style="font-weight:400">(повторю через пару карточек)</small></button>`
+    ${!done ? '' : '<div class="actions">'}${!done ? '' : st !== 'right' ? `<button class="btn primary big" data-tg="0">Дальше → <small style="font-weight:400">(повторю через пару карточек)</small></button>`
       : tries ? `<button class="btn primary big" data-tg="1">Дальше → <small style="font-weight:400">(следующий раз через ${nextIvLabel(w.id, 1)})</small></button>`
-      : `<div class="grades" style="grid-template-columns:1fr 1fr"><button class="good" data-tg="2">Хорошо<small>через ${nextIvLabel(w.id, 2)} · Enter</small></button><button data-tg="3">Легко<small>через ${nextIvLabel(w.id, 3)}</small></button></div>`}`;
+      : `<div class="grades" style="grid-template-columns:1fr 1fr"><button class="good" data-tg="2">Хорошо<small>через ${nextIvLabel(w.id, 2)} · Enter</small></button><button data-tg="3">Легко<small>через ${nextIvLabel(w.id, 3)}</small></button></div>`}${done ? '</div>' : ''}`;
   if (!done) {
     const inp = document.getElementById('ans'); inp.focus();
     const check = () => {
@@ -530,7 +538,8 @@ function answerDiff(input, w) {
   }
   return `<div class="diff-box small">Вы написали: <span class="diff">${pinyinDiff(input, w.py).html}</span></div>`;
 }
-function ansPlaceholder() { return S.settings.hanziOnly ? 'Иероглифами (китайская клавиатура)' : 'Иероглифы или пиньинь'; }
+function ansPlaceholder() { return S.settings.hanziOnly ? 'Введите иероглифы' : 'Иероглифы или пиньинь'; }
+function ansHint() { return S.settings.hanziOnly ? '⌨️ Китайская клавиатура: наберите пиньинь и выберите иероглиф' : 'Тоны можно не ставить. ü пишется как v или u.'; }
 function dayLabel(key) {
   if (key === todayKey()) return 'Сегодня';
   const y = new Date(); y.setDate(y.getDate() - 1);
@@ -642,7 +651,7 @@ function drawReviewCard() {
   const done = rv.state !== 'ask';
   const ex = done ? exampleFor(w) : null;
   app.innerHTML = `
-    <div class="row" style="justify-content:space-between;margin-bottom:8px"><a href="#/review" class="small">← ${esc(rv.name)}</a><span class="muted small">${rv.queue.length} осталось</span></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><b class="small">${esc(rv.name)}</b><span class="muted small">${rv.queue.length} осталось</span></div>
     <div class="progress"><div style="width:${pct}%"></div></div>
     <div class="card flash">
       <div class="prompt">${esc(w.ru)}</div>
@@ -663,9 +672,9 @@ function drawReviewCard() {
           <button class="btn primary" id="check">Проверить</button>
           <button class="btn" id="giveup">Не помню</button>
         </div>
-        <p class="hint">Тоны можно не ставить. ü пишется как v или u.</p>`}
+        <p class="hint">${ansHint()}</p>`}
     </div>
-    ${done ? '<button class="btn primary big" id="next">Дальше →</button><p class="muted small" style="text-align:center">Enter — дальше</p>' : ''}`;
+    ${done ? '<div class="actions"><button class="btn primary big" id="next">Дальше →</button></div>' : ''}`;
   if (!done) {
     const inp = document.getElementById('ans');
     inp.focus();
@@ -971,6 +980,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 document.addEventListener('click', (e) => {
+  if (e.target.closest('#hideInstall')) { S.hideInstall = true; save(); e.target.closest('.install-card').remove(); return; }
   if (e.target.closest('#installBtn') && installPrompt) { installPrompt.prompt(); installPrompt.userChoice.finally(() => { installPrompt = null; router(); }); }
 });
 
