@@ -127,6 +127,24 @@ function similarity(target, heard) {
   }
   return dp[h.length] / Math.max(t.length, h.length);
 }
+// Посимвольное сравнение (LCS): в ответе помечаем лишние/неверные иероглифы, в образце — пропущенные.
+function charDiff(answer, target) {
+  const a = [...normHz(answer)], t = [...normHz(target)];
+  const L = Array.from({ length: a.length + 1 }, () => Array(t.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = t.length - 1; j >= 0; j--) L[i][j] = a[i] === t[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const okA = new Set(), okT = new Set();
+  for (let i = 0, j = 0; i < a.length && j < t.length;) {
+    if (a[i] === t[j]) { okA.add(i++); okT.add(j++); } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
+  }
+  const mk = (arr, ok, cls) => arr.map((c, k) => ok.has(k) ? esc(c) : `<mark class="${cls}">${esc(c)}</mark>`).join('');
+  return { a: mk(a, okA, 'x'), t: mk(t, okT, 'miss'), extra: a.length - okA.size, miss: t.length - okT.size };
+}
+// То же для пиньиня: сравниваем слоги по порядку без учёта тонов.
+function pinyinDiff(answer, target) {
+  const a = syllables(answer.replace(/[0-9]/g, ' ').replace(/v/g, 'ü')), t = syllables(target);
+  const bad = a.filter((x, k) => !t[k] || plain(x).replace('ü', 'u') !== plain(t[k]).replace('ü', 'u')).length;
+  return { html: a.map((x, k) => (!t[k] || plain(x).replace('ü', 'u') !== plain(t[k]).replace('ü', 'u')) ? `<mark class="x">${esc(x)}</mark>` : esc(x)).join(' '), bad, miss: Math.max(0, t.length - a.length) };
+}
 
 /* ================= Пиньинь ================= */
 const TONE_MAP = { 'ā': 1, 'á': 2, 'ǎ': 3, 'à': 4, 'ē': 1, 'é': 2, 'ě': 3, 'è': 4, 'ī': 1, 'í': 2, 'ǐ': 3, 'ì': 4, 'ō': 1, 'ó': 2, 'ǒ': 3, 'ò': 4, 'ū': 1, 'ú': 2, 'ǔ': 3, 'ù': 4, 'ǖ': 1, 'ǘ': 2, 'ǚ': 3, 'ǜ': 4 };
@@ -397,7 +415,8 @@ function renderTypeCard(w) {
         <div class="answer ${st === 'right' ? 'ok' : 'bad'}">${st === 'right' ? (tries ? '✅ Верно, со второй попытки' : '✅ Верно!') : '📖 Правильный ответ:'}</div>
         <div class="hz ${w.deck === 'phr' ? 'phrase' : ''}">${esc(w.hz)}</div>
         <div class="py">${colorPinyin(w.py)}</div>
-        <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button>${SR ? '<button class="btn sm" id="mic">🎤</button>' : ''}</div>
+        ${session.lastInput ? answerDiff(session.lastInput, w) : ''}
+        <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button>${SR ? '<button class="btn sm" id="mic">🎤 Произношение</button>' : ''}</div>
         <div id="recres" class="rec-result"></div>
         ${ex ? `<div class="example"><div class="small muted">Пример</div><div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
       ` : `
@@ -413,7 +432,7 @@ function renderTypeCard(w) {
     const check = () => {
       if (!inp.value.trim()) return;
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) { session.tstate = 'right'; renderLearn(); }
-      else { session.ttries = tries + 1; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
+      else { session.ttries = tries + 1; session.lastInput = inp.value.trim(); document.getElementById('fb').innerHTML = wrongMsg(inp.value, w); inp.select(); }
     };
     inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
@@ -431,7 +450,7 @@ function answer(g) {
   grade(id, g);
   if (g === 0) session.queue.splice(Math.min(session.queue.length, 3), 0, id);
   else session.done++;
-  session.revealed = false; session.mode = null; session.tstate = null; session.ttries = 0;
+  session.revealed = false; session.mode = null; session.tstate = null; session.ttries = 0; session.lastInput = '';
   renderLearn();
 }
 document.addEventListener('keydown', (e) => {
@@ -449,7 +468,8 @@ function micCheck(target, out, btn, onScore) {
     const best = alts.map((a) => ({ a, s: similarity(target, a) })).sort((x, y) => y.s - x.s)[0];
     const pct = Math.round(best.s * 100);
     out.className = 'rec-result ' + (pct >= 80 ? 'ok' : 'bad');
-    out.innerHTML = `${pct >= 80 ? '✅ Отлично!' : pct >= 50 ? '🟡 Почти' : '❌ Не похоже'} Распознано: <span class="hz">${esc(best.a)}</span> (${pct}%)`;
+    const d = charDiff(best.a, target);
+    out.innerHTML = `${pct >= 80 ? '✅ Отлично!' : pct >= 50 ? '🟡 Почти' : '❌ Не похоже'} (${pct}%)<div>Распознано: <span class="hz diff">${d.a || '—'}</span></div>${d.miss ? `<div>Образец: <span class="hz diff">${d.t}</span> <span class="small">— подчёркнуто то, что не получилось</span></div>` : ''}`;
     if (onScore) onScore(pct);
   }, (err) => { if (btn) btn.disabled = false; out.className = 'rec-result bad'; out.textContent = err; });
 }
@@ -484,8 +504,31 @@ function checkAnswer(input, w) {
   if (/\d/.test(inp)) return inp.replace(/[05]/g, '') === numberedPinyin(w.py);
   return plain(inp) === plain(w.py).replace(/[\s'’.,!?。，！？…—-]/g, '');
 }
-function wrongMsg(input) {
-  return S.settings.hanziOnly && !/[一-鿿]/.test(input) ? '⌨️ Нужны иероглифы: наберите пиньинь на китайской клавиатуре и выберите нужный иероглиф' : '❌ Неверно, попробуйте ещё раз';
+function nHz(n) { return n % 10 === 1 && n % 100 !== 11 ? 'иероглиф' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'иероглифа' : 'иероглифов'; }
+// Сообщение об ошибке с подсветкой: что именно не так в ответе (HTML).
+function wrongMsg(input, w) {
+  const hasHz = /[一-鿿]/.test(input);
+  if (S.settings.hanziOnly && !hasHz) return '⌨️ Нужны иероглифы: наберите пиньинь на китайской клавиатуре и выберите нужный иероглиф';
+  if (!w) return '❌ Неверно, попробуйте ещё раз';
+  if (hasHz) {
+    const d = charDiff(input, w.hz);
+    const len = [...normHz(w.hz)].length;
+    const notes = [];
+    if (d.extra) notes.push(d.extra === [...normHz(input)].length ? 'ни один иероглиф не подходит' : 'красным — неверные или лишние');
+    if (d.miss) notes.push(`не хватает ${d.miss} ${nHz(d.miss)}`);
+    return `❌ Ваш ответ: <span class="hz diff">${d.a}</span><div class="small">${notes.join(', ')} · в слове ${len} ${nHz(len)}. Попробуйте ещё раз.</div>`;
+  }
+  const d = pinyinDiff(input, w.py);
+  return `❌ Ваш ответ: <span class="diff">${d.html}</span><div class="small">${d.bad ? 'красным — неверные слоги' : ''}${d.bad && d.miss ? ', ' : ''}${d.miss ? `не хватает слогов: ${d.miss}` : ''}. Попробуйте ещё раз.</div>`;
+}
+// Блок «Вы написали → правильно» после показа ответа.
+function answerDiff(input, w) {
+  if (!input) return '';
+  if (/[一-鿿]/.test(input)) {
+    const d = charDiff(input, w.hz);
+    return `<div class="diff-box small">Вы написали: <span class="hz diff">${d.a}</span> → правильно: <span class="hz diff">${d.t}</span></div>`;
+  }
+  return `<div class="diff-box small">Вы написали: <span class="diff">${pinyinDiff(input, w.py).html}</span></div>`;
 }
 function ansPlaceholder() { return S.settings.hanziOnly ? 'Иероглифами (китайская клавиатура)' : 'Иероглифы или пиньинь'; }
 function dayLabel(key) {
@@ -573,16 +616,20 @@ function startReview(set) {
   const size = S.settings.reviewSize || 20;
   let words = shuffle([...set.words]);
   if (size) words = words.slice(0, size);
-  rv = { name: set.name, queue: words.map((w) => w.id), total: words.length, right: 0, wrong: [], state: 'ask', tries: 0, retried: {} };
+  rv = { name: set.name, queue: words.map((w) => w.id), total: words.length, right: 0, wrong: [], state: 'ask', tries: 0, retried: {}, said: {} };
   location.hash = '#/review/go';
 }
 function drawReviewCard() {
   if (!rv.queue.length) {
     const wrongWords = rv.wrong.map((id) => WORD_BY_ID[id]);
+    const saidIds = Object.keys(rv.said || {});
+    const weakSaid = saidIds.filter((id) => rv.said[id] < 80);
     app.innerHTML = `<div class="card empty"><div class="big-emoji">${rv.wrong.length ? '💪' : '🎉'}</div>
       <h2>${esc(rv.name)}: готово</h2>
       <p>С первой попытки: <b>${rv.right}</b> из ${rv.total}</p>
       ${wrongWords.length ? `<p class="muted small">Было трудно: ${wrongWords.map((w) => `<span class="hz">${esc(w.hz)}</span>`).join(', ')}</p>` : ''}
+      ${saidIds.length ? `<p>Произношение: <b>${Math.round(saidIds.reduce((a, id) => a + rv.said[id], 0) / saidIds.length)}%</b> <span class="muted small">(проверено слов: ${saidIds.length})</span></p>` : ''}
+      ${weakSaid.length ? `<p class="muted small">Потренируйте вслух: ${weakSaid.map((id) => `<span class="hz">${esc(WORD_BY_ID[id].hz)}</span> ${rv.said[id]}%`).join(', ')}</p>` : ''}
       <div class="row" style="justify-content:center">
         ${wrongWords.length ? '<button class="btn primary" id="again">Повторить ошибки</button>' : ''}
         <a class="btn" href="#/review">К списку</a></div></div>`;
@@ -604,7 +651,9 @@ function drawReviewCard() {
         <div class="answer ${rv.state === 'right' ? 'ok' : 'bad'}">${rv.state === 'right' ? '✅ Верно!' : '📖 Правильный ответ:'}</div>
         <div class="hz ${w.deck === 'phr' ? 'phrase' : ''}">${esc(w.hz)}</div>
         <div class="py">${colorPinyin(w.py)}</div>
+        ${rv.lastInput ? answerDiff(rv.lastInput, w) : ''}
         <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button></div>
+        ${SR ? `<button class="btn big ${rv.said[w.id] != null ? '' : 'primary'}" id="mic" style="margin-top:10px">🎤 ${rv.said[w.id] != null ? 'Сказать ещё раз' : 'Скажите вслух — проверю произношение'}</button><div id="recres" class="rec-result" style="text-align:center"></div>` : ''}
         ${ex ? `<div class="example"><div class="small muted">Пример</div>
           <div class="row" style="gap:10px;justify-content:center;flex-wrap:nowrap"><div style="text-align:left"><div class="hz" style="font-size:22px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
       ` : `
@@ -623,7 +672,7 @@ function drawReviewCard() {
     const check = () => {
       if (!inp.value.trim()) return;
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) { if (!rv.tries) rv.right++; rv.state = 'right'; finishWord(w); }
-      else { rv.tries++; document.getElementById('fb').className = 'rec-result bad'; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
+      else { rv.tries++; rv.lastInput = inp.value.trim(); document.getElementById('fb').className = 'rec-result bad'; document.getElementById('fb').innerHTML = wrongMsg(inp.value, w); inp.select(); }
     };
     inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
@@ -633,6 +682,10 @@ function drawReviewCard() {
     const nx = document.getElementById('next');
     nx.onclick = nextReview;
     nx.focus();
+    const mic = document.getElementById('mic');
+    if (mic) mic.onclick = () => micCheck(w.hz, document.getElementById('recres'), mic, (p) => {
+      rv.said[w.id] = Math.max(rv.said[w.id] || 0, p); mic.classList.remove('primary'); mic.textContent = '🎤 Сказать ещё раз'; nx.focus();
+    });
   }
 }
 function finishWord(w) {
@@ -649,7 +702,7 @@ function finishWord(w) {
 function nextReview() {
   const id = rv.queue.shift();
   if (rv.tries && !rv.retried[id]) { rv.retried[id] = true; rv.queue.push(id); }
-  rv.state = 'ask'; rv.tries = 0;
+  rv.state = 'ask'; rv.tries = 0; rv.lastInput = '';
   drawReviewCard();
 }
 document.addEventListener('keydown', (e) => {

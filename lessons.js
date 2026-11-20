@@ -145,7 +145,7 @@ function startLesson(n) {
     tones: makeToneQs(words), toneRight: 0,
     speak: makeSpeakQs(L, words), speakSkipped: false,
     quiz: shuffle(words.map((w) => w.id)), quizRight: 0, quizWrong: [], tries: 0, state: 'ask', retried: {},
-    hw: makeHomework(L), hwRight: 0, hwState: null,
+    hw: makeHomework(L), hwRight: 0, hwState: null, errLog: [],
   };
   location.hash = '#/lessons/go';
 }
@@ -356,6 +356,7 @@ function lsQuiz(head) {
         <div class="answer ${ls.state === 'right' ? 'ok' : 'bad'}">${ls.state === 'right' ? '✅ Верно!' : '📖 Правильный ответ:'}</div>
         <div class="hz">${esc(w.hz)}</div>
         <div class="py">${colorPinyin(w.py)}</div>
+        ${ls.lastInput ? answerDiff(ls.lastInput, w) : ''}
         <div class="row" style="justify-content:center">${playBtn(w.hz)}</div>
         ${exampleBox(exampleFor(w))}
       ` : `
@@ -371,7 +372,11 @@ function lsQuiz(head) {
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) {
         if (!ls.tries && !ls.retried[w.id]) ls.quizRight++;
         ls.state = 'right'; drawLesson();
-      } else { ls.tries++; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
+      } else {
+        ls.tries++; ls.lastInput = inp.value.trim();
+        ls.errLog.push({ what: 'Слово «' + w.ru + '»', your: ls.lastInput, right: w.hz, py: w.py });
+        document.getElementById('fb').innerHTML = wrongMsg(inp.value, w); inp.select();
+      }
     };
     inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
@@ -387,7 +392,7 @@ function lsQuiz(head) {
         if (S.cards[id]) { S.cards[id].due = Math.min(S.cards[id].due, Date.now()); }
         S.mistakes = [id, ...(S.mistakes || []).filter((x) => x !== id)].slice(0, 200); save();
       }
-      ls.tries = 0; ls.state = 'ask'; drawLesson();
+      ls.tries = 0; ls.lastInput = ''; ls.state = 'ask'; drawLesson();
     };
   }
 }
@@ -462,7 +467,7 @@ function lsHomework(head) {
   if (t.type === 'order') {
     if (!t.pool) t.pool = shuffle(t.chunks.map((c, i) => ({ c, i })));
     body = `<div class="muted small">Составьте предложение из слов: «${esc(t.ex[2])}»</div>
-      <div class="build">${t.picked.map((p, j) => `<button class="tok on" data-un="${j}" ${answered ? 'disabled' : ''}>${esc(p.c)}</button>`).join('') || '<span class="muted small">нажимайте на слова ниже</span>'}</div>
+      <div class="build">${t.picked.map((p, j) => `<button class="tok on ${answered && !ls.hwState ? (p.c === t.chunks[j] ? 'right' : 'wrong') : ''}" data-un="${j}" ${answered ? 'disabled' : ''}>${esc(p.c)}</button>`).join('') || '<span class="muted small">нажимайте на слова ниже</span>'}</div>
       <div class="build pool">${t.pool.map((p, j) => t.picked.includes(p) ? '' : `<button class="tok" data-pk="${j}" ${answered ? 'disabled' : ''}>${esc(p.c)}</button>`).join('')}</div>`;
   } else if (t.type === 'gap') {
     body = `<div class="muted small">${esc(t.title)}</div>
@@ -478,7 +483,7 @@ function lsHomework(head) {
       <div class="prompt" style="margin:8px 0">${esc(t.ex[2])}</div>
       <div class="pick-opts">${t.opts.map((o, j) => `<button class="hz ${answered ? (o === t.ex ? 'right' : j === t.chosen ? 'wrong' : '') : ''}" data-pick="${j}" ${answered ? 'disabled' : ''}>${esc(o[0])}</button>`).join('')}</div>`;
   }
-  const solution = answered ? `<div class="example"><div class="answer ${ls.hwState ? 'ok' : 'bad'}">${ls.hwState ? '✅ Верно!' : '❌ Правильно так:'}</div>
+  const solution = answered ? `<div class="example">${!ls.hwState && t.type === 'order' ? '<div class="small muted">Красным — слова не на своём месте.</div>' : ''}<div class="answer ${ls.hwState ? 'ok' : 'bad'}">${ls.hwState ? '✅ Верно!' : '❌ Правильно так:'}</div>
       <div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:22px">${esc(t.ex[0])}</div><div class="py small">${colorPinyin(t.ex[1])}</div><div class="small">${esc(t.ex[2])}</div></div>${playBtn(t.ex[0])}</div></div>` : '';
   app.innerHTML = `${head}
     <div class="muted small" style="margin-bottom:6px">Домашнее задание · ${ls.i + 1} из ${ls.hw.length}</div>
@@ -486,17 +491,31 @@ function lsHomework(head) {
     <div class="row">${answered ? '<button class="btn primary big" id="next">Дальше →</button>'
       : t.type === 'order' ? `<button class="btn" id="reset">Сбросить</button><button class="btn primary" id="checkOrder" style="flex:1" ${t.picked.length === t.chunks.length ? '' : 'disabled'}>Проверить</button>` : ''}</div>`;
   if (t.type === 'listen' && !answered && !t.played) { t.played = true; speak(t.ex[0]); }
-  const finish = (ok) => { ls.hwState = ok; if (ok) ls.hwRight++; drawLesson(); speak(t.ex[0]); };
+  const finish = (ok, your) => {
+    ls.hwState = ok; if (ok) ls.hwRight++;
+    else ls.errLog.push({ what: { order: 'Порядок слов', gap: 'Пропуск', listen: 'Аудирование', pick: 'Перевод' }[t.type], your, right: t.type === 'listen' ? t.ex[2] : t.ex[0], py: t.type === 'listen' ? '' : t.ex[1], ru: t.type === 'listen' ? t.ex[0] : '', diff: t.type === 'gap', toks: t.type === 'order' ? t.picked.map((p) => p.c) : null, chunks: t.chunks });
+    drawLesson(); speak(t.ex[0]);
+  };
   app.querySelectorAll('[data-pk]').forEach((b) => { b.onclick = () => { t.picked.push(t.pool[+b.dataset.pk]); drawLesson(); }; });
   app.querySelectorAll('[data-un]').forEach((b) => { b.onclick = () => { t.picked.splice(+b.dataset.un, 1); drawLesson(); }; });
   const rs = document.getElementById('reset'); if (rs) rs.onclick = () => { t.picked = []; drawLesson(); };
-  const co = document.getElementById('checkOrder'); if (co) co.onclick = () => finish(t.picked.map((p) => p.c).join('') === t.chunks.join(''));
-  app.querySelectorAll('[data-gap]').forEach((b) => { b.onclick = () => { t.chosen = b.dataset.gap; finish(t.chosen === t.key); }; });
-  app.querySelectorAll('[data-pick]').forEach((b) => { b.onclick = () => { t.chosen = +b.dataset.pick; finish(t.opts[t.chosen] === t.ex); }; });
+  const co = document.getElementById('checkOrder'); if (co) co.onclick = () => finish(t.picked.map((p) => p.c).join('') === t.chunks.join(''), t.picked.map((p) => p.c).join(''));
+  app.querySelectorAll('[data-gap]').forEach((b) => { b.onclick = () => { t.chosen = b.dataset.gap; finish(t.chosen === t.key, t.text.replace(/_+|＿+|（\s*）/, t.chosen)); }; });
+  app.querySelectorAll('[data-pick]').forEach((b) => { b.onclick = () => { t.chosen = +b.dataset.pick; finish(t.opts[t.chosen] === t.ex, t.type === 'listen' ? t.opts[t.chosen][2] : t.opts[t.chosen][0]); }; });
   const nx = document.getElementById('next'); if (nx) nx.onclick = () => { ls.hwState = null; ls.i++; drawLesson(); };
 }
 
 /* 8. Итог */
+function errRow(e) {
+  const hz = e.diff !== false && /[一-鿿]/.test(e.your) && /[一-鿿]/.test(e.right);
+  if (e.toks) return `<div class="err-row"><div class="small muted">${esc(e.what)} · красным — не на своём месте</div>
+    <div>Ваш ответ: <span class="hz diff">${e.toks.map((c, j) => c === e.chunks[j] ? esc(c) : `<mark class="x" style="text-decoration:none">${esc(c)}</mark>`).join(' ')}</span></div>
+    <div>Правильно: <span class="hz diff">${e.chunks.map(esc).join(' ')}</span> <span class="py small">${colorPinyin(e.py)}</span></div></div>`;
+  const d = hz ? charDiff(e.your, e.right) : null;
+  return `<div class="err-row"><div class="small muted">${esc(e.what)}</div>
+    <div>Ваш ответ: <span class="${hz ? 'hz ' : ''}diff">${hz ? d.a : `<mark class="x">${esc(e.your)}</mark>`}</span></div>
+    <div>Правильно: <span class="${hz ? 'hz ' : ''}diff">${hz ? d.t : esc(e.right)}</span>${e.py ? ` <span class="py small">${colorPinyin(e.py)}</span>` : ''}${e.ru ? ` <span class="hz small">${esc(e.ru)}</span>` : ''}</div></div>`;
+}
 function lsDone(head) {
   const qTotal = ls.words.length || 1, hTotal = ls.hw.length || 1;
   const score = Math.round(((ls.quizRight / qTotal) * 0.5 + (ls.hwRight / hTotal) * 0.5) * 100);
@@ -513,6 +532,7 @@ function lsDone(head) {
       <div class="big-emoji">${score >= 80 ? '🎉' : score >= 50 ? '👍' : '💪'}</div>
       <h2>${lessonName(ls.L)} пройден — ${score}%</h2>
       <p>Слова с первой попытки: <b>${ls.quizRight}/${ls.words.length}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}${speakAvg() != null ? ` · Произношение: <b>${speakAvg()}%</b>` : ''}</p>
+      ${ls.errLog.length ? `<details class="gram err-log" open><summary>Где были ошибки (${ls.errLog.length})</summary><div class="inner">${ls.errLog.map(errRow).join('')}</div></details>` : ''}
       ${wrong.length ? `<p class="muted small">Повторите: ${wrong.map((w) => `<span class="hz">${esc(w.hz)}</span> (${esc(w.ru)})`).join(', ')}. Эти слова придут в карточки раньше.</p>` : ''}
       <p class="muted small">Слова урока добавлены в карточки — завтра загляните в «Карточки», чтобы их повторить. Перед следующим уроком перечитайте диалог вслух.</p>
       <div class="row" style="justify-content:center">

@@ -291,3 +291,13 @@ details.path[open] > summary b::after { content: ' ▴'; }
 .lesson-pick { margin-top: 8px; flex-wrap: nowrap; }
 .lesson-pick select { flex: 1; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; }
 @media (max-width: 520px) { .lesson-pick { flex-wrap: wrap; } .lesson-pick select, .lesson-pick .btn { width: 100%; } }
+.diff mark { background: none; color: inherit; padding: 0 1px; border-radius: 4px; }
+.diff mark.x { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); text-decoration: line-through; text-decoration-thickness: 2px; }
+.diff mark.miss { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.hz.diff { font-size: 1.25em; }
+.diff-box { margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.tok.right { border-color: var(--ok); color: var(--ok); }
+.tok.wrong { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.err-log { text-align: left; margin: 12px 0; }
+.err-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.err-row:last-child { border-bottom: 0; }
