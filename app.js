@@ -28,10 +28,10 @@ const DEFAULT_STATE = {
   cards: {},          // id -> {due, iv, ef, reps, lapses}
   days: {},           // 'YYYY-MM-DD' -> {rev, new}
   settings: {
-    newPerDay: 10,
+    newPerDay: 0,
     maxLevel: 4,
     decks: { life: true, phr: true },
-    mode: 'mixed',    // read | listen | speak | mixed
+    mode: 'type',     // type | read | listen | speak | mixed
     rate: 0.8,
     voice: '',
     autoplay: true,
@@ -48,6 +48,8 @@ function load() {
   return JSON.parse(JSON.stringify(DEFAULT_STATE));
 }
 let S = load();
+if (!S.typeMigrated) { S.settings.mode = 'type'; S.typeMigrated = true; }
+if (!S.lessonsMigrated) { S.settings.newPerDay = 0; S.lessonsMigrated = true; }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* приватный режим */ }
 }
@@ -186,7 +188,7 @@ function grade(id, g) { // g: 0 снова, 1 трудно, 2 хорошо, 3 л
   } else {
     if (g === 1) { c.iv = c.reps === 0 ? 1 : Math.max(1, c.iv * 1.2); c.ef = Math.max(1.3, c.ef - 0.15); }
     if (g === 2) { c.iv = c.reps === 0 ? 1 : c.reps === 1 ? 3 : c.iv * c.ef; }
-    if (g === 3) { c.iv = c.reps === 0 ? 4 : c.iv * c.ef * 1.3; c.ef += 0.15; }
+    if (g === 3) { c.iv = c.reps === 0 ? 4 : c.reps === 1 ? 5 : c.iv * c.ef * 1.3; c.ef += 0.15; }
     c.iv = Math.round(c.iv * 10) / 10;
     c.reps++;
     const d = new Date(); d.setHours(4, 0, 0, 0);
@@ -206,7 +208,7 @@ function nextIvLabel(id, g) {
   let iv;
   if (g === 1) iv = c.reps === 0 ? 1 : Math.max(1, c.iv * 1.2);
   if (g === 2) iv = c.reps === 0 ? 1 : c.reps === 1 ? 3 : c.iv * c.ef;
-  if (g === 3) iv = c.reps === 0 ? 4 : c.iv * c.ef * 1.3;
+  if (g === 3) iv = c.reps === 0 ? 4 : c.reps === 1 ? 5 : c.iv * c.ef * 1.3;
   iv = Math.round(iv);
   return iv < 31 ? iv + ' дн' : Math.round(iv / 30) + ' мес';
 }
@@ -220,6 +222,7 @@ const routes = {
   grammar: renderGrammar,
   dict: renderDict,
   review: renderReview,
+  lessons: renderLessons,
   settings: renderSettings,
 };
 function router() {
@@ -247,11 +250,22 @@ function renderHome() {
       <div class="card stat"><b>${t.rev}</b><span>повторено сегодня</span></div>
       <div class="card stat"><b>${learned}</b><span>слов в изучении</span></div>
     </div>
+    ${(() => { const L = course()[nextLessonN() - 1]; return `<div class="card next-lesson">
+      <div class="muted small">Следующий урок · ${DECKS[L.deck].name}</div>
+      <h2 style="margin:4px 0 6px">Урок ${L.n}</h2>
+      <div class="small">${lessonSummary(L)}</div>
+      <a href="#/lessons/${L.n}" class="btn primary big" style="margin-top:12px">Начать урок →</a>
+    </div>`; })()}
     <div class="card">
-      <h3>Сегодня</h3>
-      <p class="muted small" style="margin:0 0 12px">${due ? `К повторению: <b>${due}</b>. ` : ''}${nw ? `Новых слов: <b>${nw}</b>.` : ''}${!due && !nw ? 'Всё повторено! Можно потренировать тоны или фразы.' : ''}</p>
-      <a href="#/learn" class="btn primary big">${due + nw ? 'Начать занятие' : 'Открыть карточки'}</a>
+      <h3>Повторение карточек</h3>
+      <p class="muted small" style="margin:0 0 12px">${due ? `К повторению: <b>${due}</b>. ` : ''}${nw ? `Новых слов: <b>${nw}</b>.` : ''}${!due && !nw ? 'Карточек на сегодня нет. Новые слова приходят из уроков.' : ''}</p>
+      <a href="#/learn" class="btn big">${due + nw ? 'Повторить карточки' : 'Открыть карточки'}</a>
     </div>
+    ${isStandalone() ? '' : `<div class="card install-card">
+      <div><b>📲 Установить как приложение</b><div class="muted small">Будет открываться с главного экрана и работать без интернета — пригодится в Китае.</div></div>
+      <button class="btn primary sm" id="installBtn" ${installPrompt ? '' : 'hidden'}>Установить</button>
+      ${installPrompt ? '' : '<div class="muted small">Android (Chrome): меню ⋮ → «Добавить на главный экран» / «Установить приложение».</div>'}
+    </div>`}
     <h2>Путь до HSK 4</h2>
     <div class="card">${levelBars()}</div>
     <h2>Чем заняться</h2>
@@ -305,7 +319,7 @@ function renderLearn() {
   if (!session || !session.queue.length) startSession();
   if (!session.queue.length) {
     app.innerHTML = `<div class="card empty"><div class="big-emoji">🎉</div><h2>На сегодня всё!</h2>
-      <p class="muted">Новые карточки появятся завтра. Хотите больше? Можно увеличить число новых слов в день в настройках.</p>
+      <p class="muted">Повторение на сегодня закончено. Новые слова приходят из уроков.</p>
       <div class="row" style="justify-content:center"><a class="btn" href="#/tones">Тренажёр тонов</a><a class="btn" href="#/phrases">Фразы</a><a class="btn" href="#/settings">Настройки</a></div></div>`;
     session = null;
     return;
@@ -313,6 +327,7 @@ function renderLearn() {
   const w = WORD_BY_ID[session.queue[0]];
   if (!session.mode) session.mode = cardMode(w);
   const mode = session.mode;
+  if (mode === 'type') return renderTypeCard(w);
   const isNew = !S.cards[w.id];
   const isPhrase = w.deck === 'phr';
   const pct = Math.round((session.done / Math.max(1, session.total)) * 100);
@@ -356,16 +371,66 @@ function renderLearn() {
   const mic = document.getElementById('mic');
   if (mic) mic.onclick = () => micCheck(w.hz, document.getElementById('recres'), mic);
 }
+// Карточка с вводом: русское слово → пишете по-китайски → озвучка и пример. Оценка ставится сама.
+function renderTypeCard(w) {
+  const st = session.tstate || 'ask';
+  const tries = session.ttries || 0;
+  const done = st !== 'ask';
+  const ex = done ? exampleFor(w) : null;
+  const pct = Math.round((session.done / Math.max(1, session.total)) * 100);
+  app.innerHTML = `
+    <div class="progress"><div style="width:${pct}%"></div></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <span class="deck-tag">${DECKS[w.deck].name}${S.cards[w.id] ? '' : ' · новое'}</span>
+      <span class="muted small">${session.queue.length} осталось</span>
+    </div>
+    <div class="card flash">
+      <div class="muted small">Напишите по-китайски (иероглифы или пиньинь, тоны необязательны)</div>
+      <div class="prompt">${esc(w.ru)}</div>
+      ${done ? `
+        <div class="answer ${st === 'right' ? 'ok' : 'bad'}">${st === 'right' ? (tries ? '✅ Верно, со второй попытки' : '✅ Верно!') : '📖 Правильный ответ:'}</div>
+        <div class="hz ${w.deck === 'phr' ? 'phrase' : ''}">${esc(w.hz)}</div>
+        <div class="py">${colorPinyin(w.py)}</div>
+        <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button>${SR ? '<button class="btn sm" id="mic">🎤</button>' : ''}</div>
+        <div id="recres" class="rec-result"></div>
+        ${ex ? `<div class="example"><div class="small muted">Пример</div><div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
+      ` : `
+        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Иероглифы или пиньинь">
+        <div id="fb" class="rec-result bad">${tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
+        <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>`}
+    </div>
+    ${!done ? '' : st !== 'right' ? `<button class="btn primary big" data-tg="0">Дальше → <small style="font-weight:400">(повторю через пару карточек)</small></button>`
+      : tries ? `<button class="btn primary big" data-tg="1">Дальше → <small style="font-weight:400">(следующий раз через ${nextIvLabel(w.id, 1)})</small></button>`
+      : `<div class="grades" style="grid-template-columns:1fr 1fr"><button class="good" data-tg="2">Хорошо<small>через ${nextIvLabel(w.id, 2)} · Enter</small></button><button data-tg="3">Легко<small>через ${nextIvLabel(w.id, 3)}</small></button></div>`}`;
+  if (!done) {
+    const inp = document.getElementById('ans'); inp.focus();
+    const check = () => {
+      if (!inp.value.trim()) return;
+      if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) { session.tstate = 'right'; renderLearn(); }
+      else { session.ttries = tries + 1; document.getElementById('fb').textContent = '❌ Неверно, попробуйте ещё раз'; inp.select(); }
+    };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); check(); } };
+    document.getElementById('check').onclick = check;
+    document.getElementById('giveup').onclick = () => { session.ttries = tries + 1; session.tstate = 'shown'; renderLearn(); };
+  } else {
+    if (S.settings.autoplay) speak(w.hz);
+    app.querySelectorAll('[data-tg]').forEach((b) => { b.onclick = () => answer(+b.dataset.tg); });
+    const first = app.querySelector('[data-tg]'); if (first) first.focus();
+    const mic = document.getElementById('mic');
+    if (mic) mic.onclick = () => micCheck(w.hz, document.getElementById('recres'), mic);
+  }
+}
 function answer(g) {
   const id = session.queue.shift();
   grade(id, g);
   if (g === 0) session.queue.splice(Math.min(session.queue.length, 3), 0, id);
   else session.done++;
-  session.revealed = false; session.mode = null;
+  session.revealed = false; session.mode = null; session.tstate = null; session.ttries = 0;
   renderLearn();
 }
 document.addEventListener('keydown', (e) => {
-  if (!location.hash.startsWith('#/learn') || !session || e.target.matches('input,select,textarea')) return;
+  if (!location.hash.startsWith('#/learn') || !session || e.target.matches('input,select,textarea,button')) return;
+  if (session.mode === 'type') return;
   if (!session.revealed && (e.code === 'Space' || e.code === 'Enter')) { e.preventDefault(); session.revealed = true; renderLearn(); }
   else if (session.revealed && ['1', '2', '3', '4'].includes(e.key)) answer(+e.key - 1);
 });
@@ -743,10 +808,10 @@ function renderSettings() {
         <select id="ml">${[1, 2, 3, 4].map((l) => `<option value="${l}" ${st.maxLevel === l ? 'selected' : ''}>HSK ${l}</option>`).join('')}</select>
         <p class="muted small">Слова всё равно идут по порядку с HSK 1; это просто потолок.</p></div>
       <div class="field"><label class="lbl">Практичные наборы</label>${deckRows}</div>
-      <div class="field"><label class="lbl" for="np">Новых карточек в день</label><input type="number" id="np" min="0" max="100" value="${st.newPerDay}"></div>
+      <div class="field"><label class="lbl" for="np">Дополнительно новых карточек в день (сверх уроков)</label><input type="number" id="np" min="0" max="100" value="${st.newPerDay}"></div>
       <div class="field"><label class="lbl">Режим карточек</label>
-        <div class="seg" id="mode">${[['mixed', 'Смешанный'], ['read', 'Читаю'], ['listen', 'Слушаю'], ['speak', 'Говорю']].map(([k, n]) => `<button data-m="${k}" class="${st.mode === k ? 'on' : ''}">${n}</button>`).join('')}</div>
-        <p class="muted small">Смешанный: новые слова сначала показываются с иероглифом, потом сайт чередует «на слух» и «скажи по-китайски».</p>
+        <div class="seg" id="mode">${[['type', 'Пишу ответ'], ['mixed', 'Смешанный'], ['read', 'Читаю'], ['listen', 'Слушаю'], ['speak', 'Говорю']].map(([k, n]) => `<button data-m="${k}" class="${st.mode === k ? 'on' : ''}">${n}</button>`).join('')}</div>
+        <p class="muted small">«Пишу ответ» (по умолчанию): русское слово → вводите по-китайски → озвучка и пример, оценка ставится сама. Смешанный: новые слова сначала показываются с иероглифом, потом сайт чередует «на слух» и «скажи по-китайски».</p>
       </div>
       <label class="check"><input type="checkbox" id="sp" ${st.showPinyin ? 'checked' : ''}> Показывать пиньинь сразу</label>
       <label class="check"><input type="checkbox" id="ap" ${st.autoplay ? 'checked' : ''}> Автоматически озвучивать</label>
@@ -790,4 +855,22 @@ function renderSettings() {
 }
 
 if ('speechSynthesis' in window) speechSynthesis.addEventListener?.('voiceschanged', () => { if (location.hash.startsWith('#/settings') || location.hash === '' || location.hash === '#/') router(); });
+
+/* ================= Офлайн и установка ================= */
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); installPrompt = e;
+  const b = document.getElementById('installBtn'); if (b) b.hidden = false;
+});
+window.addEventListener('appinstalled', () => { installPrompt = null; toast('Приложение установлено 🎉'); });
+function isStandalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone; }
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').then(() => {
+    try { if (!localStorage.getItem('zh-offline-ok')) { localStorage.setItem('zh-offline-ok', '1'); toast('Сайт сохранён для работы без интернета'); } } catch (e) { /* ничего */ }
+  }).catch(() => {});
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#installBtn') && installPrompt) { installPrompt.prompt(); installPrompt.userChoice.finally(() => { installPrompt = null; router(); }); }
+});
+
 router();
