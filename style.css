@@ -288,3 +288,6 @@ details.path[open] > summary b::after { content: ' ▴'; }
 .path-item.done .mk, .path-item.done .sc { color: var(--ok); }
 .path-item.cur { background: var(--accent-soft, var(--surface-2)); font-weight: 600; }
 .path-item.cur .mk, .path-item.cur .sc { color: var(--accent); }
+.lesson-pick { margin-top: 8px; flex-wrap: nowrap; }
+.lesson-pick select { flex: 1; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; }
+@media (max-width: 520px) { .lesson-pick { flex-wrap: wrap; } .lesson-pick select, .lesson-pick .btn { width: 100%; } }
