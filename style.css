@@ -269,3 +269,10 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .phrase.dlg .tools { flex-direction: column; }
 .phrase.dlg .who { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 4px; }
 .ru.blur { filter: blur(5px); cursor: pointer; user-select: none; }
+.dot.new { background: var(--border); }
+.dot.learning { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.dot.strong { background: var(--ok); }
+.lvl-prog { margin-bottom: 10px; }
+.lesson-row .t small.topics { font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill { display: inline-block; font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }

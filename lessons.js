@@ -36,28 +36,96 @@ function nextLessonCard() {
     <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">Начать урок →</a>
   </div>`;
 }
+function wordStatus(id) {
+  const c = S.cards[id];
+  if (!c) return 'new';
+  return c.iv >= 21 ? 'strong' : 'learning';
+}
+function levelStats(lv) {
+  const list = course().filter((x) => x.lvl === lv);
+  const ids = [...new Set(list.flatMap((x) => x.ids))];
+  const done = list.filter(lessonState);
+  return {
+    list, total: list.length, done: done.length,
+    words: ids.length, learning: ids.filter((id) => wordStatus(id) !== 'new').length, strong: ids.filter((id) => wordStatus(id) === 'strong').length,
+    avg: done.length ? Math.round(done.reduce((a, L) => a + lessonState(L).score, 0) / done.length) : null,
+  };
+}
+function bar(part, total, part2) {
+  const w = (x) => total ? Math.round((x / total) * 100) : 0;
+  return `<div class="progress two"><div class="p-in" style="width:${w(part)}%"></div>${part2 != null ? `<div class="p-solid" style="width:${w(part2)}%"></div>` : ''}</div>`;
+}
 function renderLessons(arg) {
   if (arg && /^\d+$/.test(arg)) return startLesson(+arg);
+  if (arg && /^i\d+$/.test(arg)) return renderLessonInfo(+arg.slice(1));
   if (arg === 'go' && ls) return drawLesson();
   const c = course();
   const next = nextLesson();
-  const done = c.filter(lessonState).length;
+  const done = c.filter(lessonState);
+  const stats = [1, 2, 3, 4].map(levelStats);
+  const allWords = stats.reduce((a, x) => a + x.words, 0), allLearn = stats.reduce((a, x) => a + x.learning, 0), allStrong = stats.reduce((a, x) => a + x.strong, 0);
+  const last = done.map((L) => lessonState(L).date).sort().pop();
   app.innerHTML = `<h1>Уроки</h1>
     ${nextLessonCard()}
-    <p class="muted small">Пройдено ${done} из ${c.length}. Уроки идут по учебникам <b>HSK Standard Course 1–4</b>: те же темы, слова и грамматика, объяснения на русском. В уроке: <b>слова → диалог → грамматика → тоны</b> (можно пропустить) <b>→ проверка слов → домашнее задание</b>. Уроки HSK 4 разделены на две части по ~15 слов. Слова урока сразу попадают в карточки.</p>
+    <div class="card">
+      <h3 style="margin-top:0">Мой прогресс</h3>
+      <div class="grid grid-3" style="margin-bottom:10px">
+        <div class="stat"><b>${done.length}/${c.length}</b><span>уроков</span></div>
+        <div class="stat"><b>${allLearn}</b><span>слов из ${allWords}</span></div>
+        <div class="stat"><b>${done.length ? Math.round(done.reduce((a, L) => a + lessonState(L).score, 0) / done.length) + '%' : '—'}</b><span>средний балл</span></div>
+      </div>
+      ${stats.map((st, k) => `<div class="lvl-prog">
+        <div class="row" style="justify-content:space-between"><b>HSK ${k + 1}</b><span class="small muted">уроки ${st.done}/${st.total} · слова ${st.learning}/${st.words}${st.avg != null ? ` · ${st.avg}%` : ''}</span></div>
+        ${bar(st.learning, st.words, st.strong)}
+      </div>`).join('')}
+      <p class="muted small" style="margin:8px 0 0">Полоса — слова уровня: <span class="dot learning"></span> в изучении, <span class="dot strong"></span> выучены (повтор реже раза в 3 недели).${last ? ` Последний урок: ${dayLabel(last).toLowerCase()}.` : ''}${allStrong ? '' : ''}</p>
+    </div>
+    <p class="muted small">Курс идёт по учебникам <b>HSK Standard Course 1–4</b>: те же темы, слова и грамматика, объяснения на русском. Нажмите на урок, чтобы посмотреть его содержание. Уроки HSK 4 разделены на две части по ~15 слов.</p>
     ${[1, 2, 3, 4].map((lv) => {
-      const list = c.filter((x) => x.lvl === lv);
-      const d = list.filter(lessonState).length;
+      const st = stats[lv - 1];
       const open = next.lvl === lv;
-      return `<details class="gram" ${open ? 'open' : ''}><summary>HSK ${lv} · ${d}/${list.length}</summary><div class="inner">
-        ${list.map((x) => {
-          const st = lessonState(x);
-          return `<a href="#/lessons/${x.n}" class="lesson-row ${st ? 'done' : ''} ${x === next ? 'cur' : ''}">
+      return `<details class="gram" ${open ? 'open' : ''}><summary>HSK ${lv} · ${st.done}/${st.total}</summary><div class="inner">
+        ${st.list.map((x) => {
+          const s2 = lessonState(x);
+          return `<a href="#/lessons/i${x.n}" class="lesson-row ${s2 ? 'done' : ''} ${x === next ? 'cur' : ''}">
             <b class="num">${x.num}${x.part ? '<small>.' + x.part + '</small>' : ''}</b>
-            <span class="t"><span class="hz">${esc(x.zh)}</span><small>${esc(x.ru)}</small></span>
-            <span class="st">${st ? '✓ ' + st.score + '%' : x === next ? '▶' : ''}</span></a>`;
+            <span class="t"><span class="hz">${esc(x.zh)}</span><small>${esc(x.ru)}</small><small class="topics">${x.gram.map((g) => esc(g.t.split(' — ')[0])).join(' · ')}</small></span>
+            <span class="st">${s2 ? '✓ ' + s2.score + '%' : x === next ? '▶ далее' : ''}</span></a>`;
         }).join('')}</div></details>`;
     }).join('')}`;
+}
+function renderLessonInfo(n) {
+  const L = course()[n - 1];
+  if (!L) { location.hash = '#/lessons'; return; }
+  const st = lessonState(L);
+  const words = L.ids.map((id) => WORD_BY_ID[id]);
+  const learn = words.filter((w) => wordStatus(w.id) !== 'new').length;
+  const prev = course()[n - 2], nx = course()[n];
+  const lbl = { new: 'новое', learning: 'в изучении', strong: 'выучено' };
+  app.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><a href="#/lessons" class="small">← Все уроки</a>
+      <span class="small">${prev ? `<a href="#/lessons/i${prev.n}">‹ пред.</a>` : ''} ${nx ? ` <a href="#/lessons/i${nx.n}">след. ›</a>` : ''}</span></div>
+    <div class="card">
+      <div class="muted small">${lessonName(L)} · урок ${L.n} из ${course().length}</div>
+      <h1 style="margin:4px 0 0"><span class="hz">${esc(L.zh)}</span> ${playBtn(L.zh)}</h1>
+      <div class="muted">${esc(L.ru)}</div>
+      <div style="margin-top:10px">${st ? `<span class="pill ok">✓ Пройден ${dayLabel(st.date).toLowerCase()} · ${st.score}% · слова ${st.quiz} · домашка ${st.hw}</span>` : '<span class="pill">Ещё не пройден</span>'}</div>
+      <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">${st ? 'Пройти ещё раз' : 'Начать урок'} →</a>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Слова · ${learn}/${words.length} в карточках</h3>
+      ${words.map((w) => `<div class="word-row"><div class="hz">${esc(w.hz)}</div><div class="meta"><div>${colorPinyin(w.py)}</div><div class="small">${esc(w.ru)}</div><div class="lvl"><span class="dot ${wordStatus(w.id)}"></span> ${lbl[wordStatus(w.id)]}</div></div>${playBtn(w.hz)}</div>`).join('')}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Грамматика</h3>
+      ${L.gram.map((g) => `<details class="gram"><summary>${esc(g.t)}</summary><div class="inner"><p>${g.x}</p>
+        ${g.ex.map((e) => `<div class="phrase"><div class="body"><div class="hz">${esc(e[0])}</div><div class="py">${colorPinyin(e[1])}</div><div class="ru">${esc(e[2])}</div></div><div class="tools">${playBtn(e[0])}</div></div>`).join('')}</div></details>`).join('')}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Диалог</h3>
+      <button class="btn sm primary" id="all" style="margin-bottom:8px">▶ Весь диалог</button>
+      ${L.dlg.map((x) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div><div class="py">${colorPinyin(x[2])}</div><div class="ru">${esc(x[3])}</div></div><div class="tools">${playBtn(x[1])}</div></div>`).join('')}
+    </div>`;
+  document.getElementById('all').onclick = () => speakQueue(L.dlg.map((x) => x[1]));
 }
 
 /* ---------- Прохождение урока ---------- */
