@@ -301,3 +301,4 @@ details.path[open] > summary b::after { content: ' ▴'; }
 .err-log { text-align: left; margin: 12px 0; }
 .err-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .err-row:last-child { border-bottom: 0; }
+.lesson-row .st .fixme { display: block; color: var(--bad); font-size: 11px; text-align: right; }
