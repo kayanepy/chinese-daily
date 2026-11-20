@@ -1,111 +1,80 @@
 'use strict';
-// Структурированные уроки: новые слова → грамматика → тоны (можно пропустить) → проверка слов → домашка → итог.
+// Уроки по структуре учебников HSK Standard Course 1–4 (данные — course-hsk*.js).
+// Шаги: слова → диалог → грамматика → тоны (можно пропустить) → проверка слов → домашка → итог.
 // Использует глобальные данные и функции из app.js (загружается раньше него, вызывается позже).
-
-const LESSON_HSK = 12;  // слов HSK на урок
-const LESSON_PRAC = 3;  // бытовых слов / фраз на урок
 
 let _course = null;
 function course() {
   if (_course) return _course;
-  const prac = PRACTICAL_DECKS.flatMap((k) => DECKS[k].words);
-  const lessons = [];
-  let p = 0;
-  HSK_DECKS.forEach((k) => {
-    const words = DECKS[k].words;
-    const lvl = DECKS[k].level;
-    const start = lessons.length;
-    let i = 0;
-    while (i < words.length) {
-      // когда бытовые слова закончились, урок целиком из HSK (15 слов)
-      const size = p < prac.length ? LESSON_HSK : LESSON_HSK + LESSON_PRAC;
-      // хвост меньше половины урока присоединяем к этому уроку
-      const end = words.length - (i + size) < size / 2 ? words.length : i + size;
-      const ids = words.slice(i, end).map((w) => w.id);
-      for (let j = 0; j < LESSON_PRAC && p < prac.length; j++) ids.push(prac[p++].id);
-      lessons.push({ n: lessons.length + 1, lvl, deck: k, ids, gram: null, gramNew: false });
-      i = end;
-    }
-    // Темы грамматики уровня равномерно по урокам уровня (HSK1–2 темы делятся на hsk1 и hsk2).
-    const count = lessons.length - start;
-    let topics;
-    if (lvl <= 2) {
-      const base = ALL_GRAMMAR.map((g, i) => ({ g, i })).filter((x) => x.g.lvl === 2);
-      const half = Math.ceil(base.length / 2);
-      topics = lvl === 1 ? base.slice(0, half) : base.slice(half);
-    } else {
-      topics = ALL_GRAMMAR.map((g, i) => ({ g, i })).filter((x) => x.g.lvl === lvl);
-    }
-    for (let t = 0; t < count; t++) {
-      const L = lessons[start + t];
-      const idx = Math.floor((t * topics.length) / count);
-      const prevIdx = t ? Math.floor(((t - 1) * topics.length) / count) : -1;
-      if (idx !== prevIdx && topics[idx]) { L.gram = topics[idx].i; L.gramNew = true; }
-    }
+  const byHz = {};
+  ALL_WORDS.forEach((w) => { if (w.deck !== 'phr') (byHz[w.hz] = byHz[w.hz] || []).push(w); });
+  _course = COURSE.map((L, i) => {
+    const ids = [...new Set(L.words.map((hz) => {
+      const c = byHz[hz]; if (!c) return null;
+      return (c.find((w) => w.deck === 'hsk' + L.lvl) || c[0]).id;
+    }).filter(Boolean))];
+    return { ...L, n: i + 1, key: `${L.lvl}-${L.num}${L.part ? '-' + L.part : ''}`, ids };
   });
-  // Уроки без новой темы повторяют одну из уже пройденных тем.
-  let seen = [];
-  lessons.forEach((L) => {
-    if (L.gramNew) seen.push(L.gram);
-    else if (seen.length) L.gram = seen[(L.n * 7) % seen.length];
-    else L.gram = 0;
-  });
-  _course = lessons;
-  return lessons;
+  return _course;
 }
-function lessonState(n) { return (S.lessons || {})[n]; }
-function nextLessonN() {
-  const c = course();
-  const L = c.find((x) => !lessonState(x.n));
-  return L ? L.n : c.length;
-}
+function lessonName(L) { return `HSK ${L.lvl} · Урок ${L.num}${L.part ? `, часть ${L.part}` : ''}`; }
+function lessonState(L) { return (S.course || {})[L.key]; }
+function nextLesson() { const c = course(); return c.find((L) => !lessonState(L)) || c[c.length - 1]; }
 
 /* ---------- Список уроков ---------- */
+function lessonSummary(L) {
+  const words = L.ids.slice(0, 6).map((id) => `<span class="hz">${esc(WORD_BY_ID[id].hz)}</span>`).join(' · ');
+  return `Слова: ${words}…<br>Грамматика: ${L.gram.map((g) => `<b>${esc(g.t)}</b>`).join('; ')}`;
+}
+function nextLessonCard() {
+  const L = nextLesson();
+  return `<div class="card next-lesson">
+    <div class="muted small">Следующий урок · ${lessonName(L)}</div>
+    <h2 style="margin:4px 0 2px"><span class="hz">${esc(L.zh)}</span></h2>
+    <div class="muted" style="margin-bottom:6px">${esc(L.ru)}</div>
+    <div class="small">${lessonSummary(L)}</div>
+    <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">Начать урок →</a>
+  </div>`;
+}
 function renderLessons(arg) {
   if (arg && /^\d+$/.test(arg)) return startLesson(+arg);
   if (arg === 'go' && ls) return drawLesson();
   const c = course();
-  const next = nextLessonN();
-  const done = c.filter((L) => lessonState(L.n)).length;
-  const L = c[next - 1];
+  const next = nextLesson();
+  const done = c.filter(lessonState).length;
   app.innerHTML = `<h1>Уроки</h1>
-    <div class="card next-lesson">
-      <div class="muted small">Следующий урок · ${DECKS[L.deck].name}</div>
-      <h2 style="margin:4px 0 6px">Урок ${L.n}</h2>
-      <div class="small">${lessonSummary(L)}</div>
-      <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">Начать урок →</a>
-    </div>
-    <p class="muted small">Пройдено ${done} из ${c.length}. Урок занимает 15–20 минут: <b>новые слова → грамматика → тоны</b> (можно пропустить) <b>→ проверка слов → домашнее задание</b>. Слова урока сразу попадают в карточки для повторения.</p>
-    ${HSK_DECKS.map((k) => {
-      const ls2 = c.filter((x) => x.deck === k);
-      const d = ls2.filter((x) => lessonState(x.n)).length;
-      const open = ls2.some((x) => x.n === next);
-      return `<details class="gram" ${open ? 'open' : ''}><summary>${DECKS[k].name} · ${d}/${ls2.length}</summary><div class="inner lesson-grid">
-        ${ls2.map((x) => {
-          const st = lessonState(x.n);
-          return `<a href="#/lessons/${x.n}" class="lesson-tile ${st ? 'done' : ''} ${x.n === next ? 'cur' : ''}"><b>${x.n}</b><small>${st ? '✓ ' + st.score + '%' : x.gramNew ? '📘 новая тема' : ''}</small></a>`;
+    ${nextLessonCard()}
+    <p class="muted small">Пройдено ${done} из ${c.length}. Уроки идут по учебникам <b>HSK Standard Course 1–4</b>: те же темы, слова и грамматика, объяснения на русском. В уроке: <b>слова → диалог → грамматика → тоны</b> (можно пропустить) <b>→ проверка слов → домашнее задание</b>. Уроки HSK 4 разделены на две части по ~15 слов. Слова урока сразу попадают в карточки.</p>
+    ${[1, 2, 3, 4].map((lv) => {
+      const list = c.filter((x) => x.lvl === lv);
+      const d = list.filter(lessonState).length;
+      const open = next.lvl === lv;
+      return `<details class="gram" ${open ? 'open' : ''}><summary>HSK ${lv} · ${d}/${list.length}</summary><div class="inner">
+        ${list.map((x) => {
+          const st = lessonState(x);
+          return `<a href="#/lessons/${x.n}" class="lesson-row ${st ? 'done' : ''} ${x === next ? 'cur' : ''}">
+            <b class="num">${x.num}${x.part ? '<small>.' + x.part + '</small>' : ''}</b>
+            <span class="t"><span class="hz">${esc(x.zh)}</span><small>${esc(x.ru)}</small></span>
+            <span class="st">${st ? '✓ ' + st.score + '%' : x === next ? '▶' : ''}</span></a>`;
         }).join('')}</div></details>`;
     }).join('')}`;
-}
-function lessonSummary(L) {
-  const words = L.ids.map((id) => WORD_BY_ID[id]).filter((w) => w.deck !== 'phr').slice(0, 6).map((w) => `<span class="hz">${esc(w.hz)}</span>`).join(' · ');
-  return `Слова: ${words}…<br>Грамматика: <b>${esc(ALL_GRAMMAR[L.gram].title)}</b>${L.gramNew ? '' : ' (повторение)'}`;
 }
 
 /* ---------- Прохождение урока ---------- */
 let ls = null;
 const STEPS = [
-  ['words', '📖 Слова'], ['grammar', '📘 Грамматика'], ['tones', '🎵 Тоны'], ['quiz', '✍️ Проверка слов'], ['hw', '📝 Домашка'], ['done', '🏁 Итог'],
+  ['words', '📖 Слова'], ['dialog', '💬 Диалог'], ['grammar', '📘 Грамматика'], ['tones', '🎵 Тоны'], ['quiz', '✍️ Проверка слов'], ['hw', '📝 Домашка'], ['done', '🏁 Итог'],
 ];
+const STEP = Object.fromEntries(STEPS.map(([k], i) => [k, i]));
 function startLesson(n) {
   const L = course()[n - 1];
   if (!L) { location.hash = '#/lessons'; return; }
   const words = L.ids.map((id) => WORD_BY_ID[id]);
   ls = {
-    L, words, step: 0, i: 0,
+    L, words, step: 0, i: 0, showRu: false, showPy: true,
     tones: makeToneQs(words), toneRight: 0,
     quiz: shuffle(words.map((w) => w.id)), quizRight: 0, quizWrong: [], tries: 0, state: 'ask', retried: {},
-    hw: makeHomework(L.gram), hwRight: 0, hwState: null,
+    hw: makeHomework(L), hwRight: 0, hwState: null,
   };
   location.hash = '#/lessons/go';
 }
@@ -116,54 +85,90 @@ function goStep(s) { ls.step = s; ls.i = 0; drawLesson(); window.scrollTo(0, 0);
 function drawLesson() {
   if (!ls) { location.hash = '#/lessons'; return; }
   const key = STEPS[ls.step][0];
-  const head = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><a href="#/lessons" class="small">← Уроки</a><b>Урок ${ls.L.n}</b></div>${stepBar()}`;
-  ({ words: lsWords, grammar: lsGrammar, tones: lsTones, quiz: lsQuiz, hw: lsHomework, done: lsDone })[key](head);
+  const head = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><a href="#/lessons" class="small">← Уроки</a><b class="small">${lessonName(ls.L)}</b></div>${stepBar()}`;
+  ({ words: lsWords, dialog: lsDialog, grammar: lsGrammar, tones: lsTones, quiz: lsQuiz, hw: lsHomework, done: lsDone })[key](head);
+}
+function exampleBox(ex, title) {
+  return ex ? `<div class="example">${title ? `<div class="small muted">${title}</div>` : ''}<div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : '';
+}
+function speakQueue(texts) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const v = voices.find((x) => x.name === S.settings.voice) || voices[0];
+  texts.forEach((t) => {
+    const u = new SpeechSynthesisUtterance(t);
+    u.lang = 'zh-CN'; u.rate = S.settings.rate; if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  });
 }
 
 /* 1. Новые слова */
 function lsWords(head) {
   const w = ls.words[ls.i];
-  const ex = exampleFor(w);
   app.innerHTML = `${head}
     <div class="progress"><div style="width:${(ls.i / ls.words.length) * 100}%"></div></div>
     <div class="card flash">
       <span class="deck-tag" style="align-self:center">${ls.i + 1} / ${ls.words.length} · ${DECKS[w.deck].name}</span>
-      <div class="hz ${w.deck === 'phr' ? 'phrase' : ''}">${esc(w.hz)}</div>
+      <div class="hz">${esc(w.hz)}</div>
       <div class="py">${colorPinyin(w.py)}</div>
       <div class="ru">${esc(w.ru)}</div>
       <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button></div>
-      ${ex ? `<div class="example"><div class="small muted">Пример</div><div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
+      ${exampleBox(exampleFor(w), 'Пример')}
       <p class="hint">Повторите вслух 2–3 раза.</p>
     </div>
     <div class="row">
       ${ls.i ? '<button class="btn" id="prev">← Назад</button>' : ''}
-      <button class="btn primary" id="next" style="flex:1">${ls.i < ls.words.length - 1 ? 'Дальше →' : 'К грамматике →'}</button>
+      <button class="btn primary" id="next" style="flex:1">${ls.i < ls.words.length - 1 ? 'Дальше →' : 'К диалогу →'}</button>
     </div>`;
   speak(w.hz);
   document.getElementById('next').onclick = () => {
     if (!S.cards[w.id]) grade(w.id, 2); // слово попадает в карточки: повторение завтра
-    if (ls.i < ls.words.length - 1) { ls.i++; drawLesson(); } else goStep(1);
+    if (ls.i < ls.words.length - 1) { ls.i++; drawLesson(); } else goStep(STEP.dialog);
   };
   const pv = document.getElementById('prev'); if (pv) pv.onclick = () => { ls.i--; drawLesson(); };
 }
 
-/* 2. Грамматика */
-function lsGrammar(head) {
-  const g = ALL_GRAMMAR[ls.L.gram];
+/* 2. Диалог */
+function lsDialog(head) {
+  const d = ls.L.dlg;
   app.innerHTML = `${head}
     <div class="card">
-      <div class="muted small">${ls.L.gramNew ? 'Новая тема' : 'Повторение темы'}</div>
-      <h2 style="margin-top:4px">${esc(g.title)}</h2>
-      <p>${g.text}</p>
-      ${g.ex.map((e) => `<div class="phrase"><div class="body"><div class="hz">${esc(e[0])}</div><div class="py">${colorPinyin(e[1])}</div><div class="ru">${esc(e[2])}</div></div><div class="tools">${playBtn(e[0])}</div></div>`).join('')}
-      <p class="hint">Прослушайте примеры и повторите их вслух. В конце урока будет домашнее задание по этой теме.</p>
+      <div class="muted small">Диалог урока</div>
+      <h2 style="margin:4px 0 2px"><span class="hz">${esc(ls.L.zh)}</span></h2>
+      <div class="muted small" style="margin-bottom:10px">${esc(ls.L.ru)}</div>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn sm primary" id="all">▶ Весь диалог</button>
+        <button class="btn sm" id="tpy">${ls.showPy ? 'Скрыть' : 'Показать'} пиньинь</button>
+        <button class="btn sm" id="tru">${ls.showRu ? 'Скрыть' : 'Показать'} перевод</button>
+      </div>
+      ${d.map((x) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div>${ls.showPy ? `<div class="py">${colorPinyin(x[2])}</div>` : ''}<div class="ru ${ls.showRu ? '' : 'blur'}">${esc(x[3])}</div></div><div class="tools">${playBtn(x[1])}</div></div>`).join('')}
+      <p class="hint">Сначала послушайте, не глядя в перевод: сколько поняли? Затем нажмите на перевод (или «Показать перевод»), проверьте себя и прочитайте каждую реплику вслух.</p>
     </div>
-    <div class="row"><button class="btn" id="prev">← Слова</button><button class="btn primary" id="next" style="flex:1">К тонам →</button></div>`;
-  document.getElementById('prev').onclick = () => { ls.step = 0; ls.i = ls.words.length - 1; drawLesson(); };
-  document.getElementById('next').onclick = () => goStep(2);
+    <div class="row"><button class="btn" id="prev">← Слова</button><button class="btn primary" id="next" style="flex:1">К грамматике →</button></div>`;
+  document.getElementById('all').onclick = () => speakQueue(d.map((x) => x[1]));
+  document.getElementById('tpy').onclick = () => { ls.showPy = !ls.showPy; drawLesson(); };
+  document.getElementById('tru').onclick = () => { ls.showRu = !ls.showRu; drawLesson(); };
+  app.querySelectorAll('.ru.blur').forEach((el) => { el.onclick = () => el.classList.remove('blur'); });
+  document.getElementById('prev').onclick = () => { ls.step = STEP.words; ls.i = ls.words.length - 1; drawLesson(); };
+  document.getElementById('next').onclick = () => goStep(STEP.grammar);
 }
 
-/* 3. Тоны */
+/* 3. Грамматика */
+function lsGrammar(head) {
+  app.innerHTML = `${head}
+    ${ls.L.gram.map((g, k) => `<div class="card">
+      <div class="muted small">Тема ${k + 1} из ${ls.L.gram.length}</div>
+      <h2 style="margin-top:4px">${esc(g.t)}</h2>
+      <p>${g.x}</p>
+      ${g.ex.map((e) => `<div class="phrase"><div class="body"><div class="hz">${esc(e[0])}</div><div class="py">${colorPinyin(e[1])}</div><div class="ru">${esc(e[2])}</div></div><div class="tools">${playBtn(e[0])}</div></div>`).join('')}
+    </div>`).join('')}
+    <p class="hint">Прослушайте примеры и повторите их вслух. В конце урока будет домашнее задание по этим темам.</p>
+    <div class="row"><button class="btn" id="prev">← Диалог</button><button class="btn primary" id="next" style="flex:1">К тонам →</button></div>`;
+  document.getElementById('prev').onclick = () => goStep(STEP.dialog);
+  document.getElementById('next').onclick = () => goStep(STEP.tones);
+}
+
+/* 4. Тоны */
 function makeToneQs(words) {
   const own = words.filter((w) => TONE_POOL.includes(w));
   const pool = shuffle([...own, ...shuffle(TONE_POOL.filter((w) => !own.includes(w))).slice(0, 5)]).slice(0, 5);
@@ -205,31 +210,30 @@ function lsTones(head) {
     S.tones.total++; if (q.chosen === q.right) S.tones.right++; save();
     drawLesson(); speak(q.w.hz);
   }; });
-  document.getElementById('skip').onclick = () => { ls.tonesSkipped = true; goStep(3); };
+  document.getElementById('skip').onclick = () => { ls.tonesSkipped = true; goStep(STEP.quiz); };
   const nx = document.getElementById('next');
-  if (nx) nx.onclick = () => { if (ls.i < ls.tones.length - 1) { ls.i++; drawLesson(); } else goStep(3); };
+  if (nx) nx.onclick = () => { if (ls.i < ls.tones.length - 1) { ls.i++; drawLesson(); } else goStep(STEP.quiz); };
 }
 
-/* 4. Проверка слов (ввод) */
+/* 5. Проверка слов (ввод) */
 function lsQuiz(head) {
-  if (!ls.quiz.length) return goStep(4);
+  if (!ls.quiz.length) return goStep(STEP.hw);
   const w = WORD_BY_ID[ls.quiz[0]];
   const done = ls.state !== 'ask';
   const total = ls.words.length;
-  const ex = done ? exampleFor(w) : null;
   app.innerHTML = `${head}
     <div class="progress"><div style="width:${((total - ls.quiz.length) / total) * 100}%"></div></div>
     <div class="card flash">
-      <div class="muted small">Напишите по-китайски (иероглифы или пиньинь, тоны необязательны)</div>
+      <div class="muted small">Напишите по-китайски${S.settings.hanziOnly ? ' иероглифами (наберите пиньинь на китайской клавиатуре и выберите иероглиф)' : ' (иероглифы или пиньинь, тоны необязательны)'}</div>
       <div class="prompt">${esc(w.ru)}</div>
       ${done ? `
         <div class="answer ${ls.state === 'right' ? 'ok' : 'bad'}">${ls.state === 'right' ? '✅ Верно!' : '📖 Правильный ответ:'}</div>
-        <div class="hz ${w.deck === 'phr' ? 'phrase' : ''}">${esc(w.hz)}</div>
+        <div class="hz">${esc(w.hz)}</div>
         <div class="py">${colorPinyin(w.py)}</div>
         <div class="row" style="justify-content:center">${playBtn(w.hz)}</div>
-        ${ex ? `<div class="example"><div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
+        ${exampleBox(exampleFor(w))}
       ` : `
-        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Иероглифы или пиньинь">
+        <input class="search answer-input" id="ans" lang="zh-CN" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ansPlaceholder()}">
         <div id="fb" class="rec-result bad">${ls.tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
         <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>`}
     </div>
@@ -241,9 +245,9 @@ function lsQuiz(head) {
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) {
         if (!ls.tries && !ls.retried[w.id]) ls.quizRight++;
         ls.state = 'right'; drawLesson();
-      } else { ls.tries++; document.getElementById('fb').textContent = '❌ Неверно, попробуйте ещё раз'; inp.select(); }
+      } else { ls.tries++; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
     };
-    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); check(); } };
+    inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
     document.getElementById('giveup').onclick = () => { ls.tries++; ls.state = 'shown'; drawLesson(); };
   } else {
@@ -262,12 +266,13 @@ function lsQuiz(head) {
   }
 }
 
-/* 5. Домашнее задание по грамматике */
+/* 6. Домашнее задание — в духе рабочей тетради HSK:
+   аудирование, выбор слова для пропуска, грамматика, порядок слов, перевод */
 function hzOnly(s) { return [...s].filter((c) => /[一-鿿]/.test(c)); }
 function chunkSentence(ex) {
   if (/[A-Za-z0-9]/.test(ex[0])) return null;
   const chars = hzOnly(ex[0]);
-  const words = ex[1].replace(/[—–]/g, ' ').split(/\s+/).map((x) => x.replace(/[.,!?;:"«»()…]/g, '')).filter(Boolean);
+  const words = ex[1].replace(/[—–-]/g, ' ').split(/\s+/).map((x) => x.replace(/[.,!?;:"«»()…“”‘’]/g, '')).filter(Boolean);
   const out = []; let pos = 0;
   for (const wd of words) {
     const syl = syllables(wd);
@@ -279,44 +284,69 @@ function chunkSentence(ex) {
   if (pos !== chars.length || out.some((x) => !x)) return null;
   return out;
 }
-function grammarKeys(g) { return [...new Set(hzOnly(g.title.split('—')[0]))]; }
-function makeHomework(gi) {
-  const g = ALL_GRAMMAR[gi];
+function makeHomework(L) {
+  const sents = [...L.dlg.map((d) => d.slice(1)), ...L.gram.flatMap((g) => g.ex)].filter((e) => !e[0].includes('…') && hzOnly(e[0]).length > 1);
+  const levelSents = COURSE.filter((x) => x.lvl === L.lvl && x !== L).flatMap((x) => x.dlg.map((d) => d.slice(1)));
+  const used = new Set();
+  const take = (arr, n, fn) => { const out = []; for (const e of shuffle([...arr])) { if (out.length >= n) break; if (used.has(e[0])) continue; const t = fn(e); if (t) { used.add(e[0]); out.push(t); } } return out; };
   const tasks = [];
-  const others = ALL_GRAMMAR.filter((x, i) => i !== gi).flatMap((x) => x.ex).filter((e) => !e[0].includes('…'));
-  shuffle([...g.ex]).forEach((e, k) => {
+  // 1) Аудирование: послушайте фразу из диалога — выберите перевод
+  tasks.push(...take(L.dlg.map((d) => d.slice(1)), 2, (e) => {
+    const others = shuffle(sents.filter((x) => x[2] !== e[2])).slice(0, 2);
+    if (others.length < 2) return null;
+    return { type: 'listen', ex: e, opts: shuffle([e, ...others]) };
+  }));
+  // 2) Выберите слово урока для пропуска
+  const lw = L.ids.map((id) => WORD_BY_ID[id]).filter((w) => !/[…]/.test(w.hz));
+  tasks.push(...take(sents, 2, (e) => {
+    const ch = chunkSentence(e) || [];
+    const w = shuffle(lw.filter((x) => ch.includes(x.hz) || ([...x.hz].length > 1 && e[0].includes(x.hz))))[0];
+    if (!w) return null;
+    const opts = shuffle([w.hz, ...shuffle(lw.filter((x) => x !== w && !e[0].includes(x.hz))).slice(0, 3).map((x) => x.hz)]);
+    if (opts.length < 3) return null;
+    return { type: 'gap', ex: e, key: w.hz, text: e[0].replace(w.hz, '＿＿'), opts, title: 'Выберите подходящее слово' };
+  }));
+  // 3) Грамматика: вставьте ключевое слово темы
+  const keys = [...new Set(COURSE.filter((x) => x.lvl <= L.lvl).flatMap((x) => x.gram.map((g) => g.k)).filter(Boolean))];
+  L.gram.filter((g) => g.k).forEach((g) => {
+    tasks.push(...take(g.ex, 1, (e) => {
+      if (!e[0].includes(g.k)) return null;
+      const opts = shuffle([g.k, ...shuffle(keys.filter((k) => k !== g.k && !e[0].includes(k) && !g.k.includes(k) && !k.includes(g.k))).slice(0, 3)]);
+      return { type: 'gap', ex: e, key: g.k, text: e[0].replace(g.k, '＿＿'), opts, title: `Грамматика: ${g.t}` };
+    }));
+  });
+  // 4) Порядок слов
+  tasks.push(...take(sents, 2, (e) => {
     const ch = chunkSentence(e);
-    if (ch && ch.length >= 3 && ch.length <= 9 && k < 2) tasks.push({ type: 'order', ex: e, chunks: ch, picked: [] });
-  });
-  const keys = grammarKeys(g);
-  const allKeys = [...new Set(ALL_GRAMMAR.flatMap(grammarKeys))];
-  const gapEx = shuffle(g.ex.filter((e) => keys.some((k) => e[0].includes(k))));
-  gapEx.slice(0, 2).forEach((e) => {
-    const k = keys.find((x) => e[0].includes(x));
-    const opts = shuffle([k, ...shuffle(allKeys.filter((x) => x !== k && !e[0].includes(x))).slice(0, 3)]);
-    tasks.push({ type: 'gap', ex: e, key: k, text: e[0].replace(k, '＿＿'), opts });
-  });
-  shuffle([...g.ex]).slice(0, 2).forEach((e) => {
-    const opts = shuffle([e, ...shuffle(others).slice(0, 2)]);
-    tasks.push({ type: 'pick', ex: e, opts });
-  });
-  return tasks.slice(0, 6);
+    if (!ch || ch.length < 3 || ch.length > 9) return null;
+    return { type: 'order', ex: e, chunks: ch, picked: [] };
+  }));
+  // 5) Как сказать по-китайски
+  tasks.push(...take(sents, 1, (e) => {
+    const others = shuffle([...sents, ...levelSents].filter((x) => x[0] !== e[0])).slice(0, 2);
+    return { type: 'pick', ex: e, opts: shuffle([e, ...others]) };
+  }));
+  return tasks;
 }
 function lsHomework(head) {
   const t = ls.hw[ls.i];
-  if (!t) return goStep(5);
-  const g = ALL_GRAMMAR[ls.L.gram];
+  if (!t) return goStep(STEP.done);
   const answered = ls.hwState !== null;
   let body = '';
   if (t.type === 'order') {
     if (!t.pool) t.pool = shuffle(t.chunks.map((c, i) => ({ c, i })));
-    body = `<div class="muted small">Соберите предложение: «${esc(t.ex[2])}»</div>
+    body = `<div class="muted small">Составьте предложение из слов: «${esc(t.ex[2])}»</div>
       <div class="build">${t.picked.map((p, j) => `<button class="tok on" data-un="${j}" ${answered ? 'disabled' : ''}>${esc(p.c)}</button>`).join('') || '<span class="muted small">нажимайте на слова ниже</span>'}</div>
       <div class="build pool">${t.pool.map((p, j) => t.picked.includes(p) ? '' : `<button class="tok" data-pk="${j}" ${answered ? 'disabled' : ''}>${esc(p.c)}</button>`).join('')}</div>`;
   } else if (t.type === 'gap') {
-    body = `<div class="muted small">Вставьте пропущенное: «${esc(t.ex[2])}»</div>
-      <div class="hz" style="font-size:28px;margin:10px 0">${esc(t.text)}</div>
+    body = `<div class="muted small">${esc(t.title)}</div>
+      <div class="hz" style="font-size:26px;margin:10px 0">${esc(t.text)}</div>
+      <div class="muted small" style="margin-bottom:10px">${esc(t.ex[2])}</div>
       <div class="tones-opts">${t.opts.map((o) => `<button class="hz ${answered ? (o === t.key ? 'right' : o === t.chosen ? 'wrong' : '') : ''}" data-gap="${esc(o)}" ${answered ? 'disabled' : ''}>${esc(o)}</button>`).join('')}</div>`;
+  } else if (t.type === 'listen') {
+    body = `<div class="muted small">Аудирование: послушайте фразу и выберите перевод</div>
+      <div class="row" style="justify-content:center;margin:12px 0">${playBtn(t.ex[0], 'big')}<button class="btn sm" data-say="${esc(t.ex[0])}" data-rate="0.5">🐢 медленно</button></div>
+      <div class="pick-opts">${t.opts.map((o, j) => `<button class="${answered ? (o === t.ex ? 'right' : j === t.chosen ? 'wrong' : '') : ''}" style="font-size:16px" data-pick="${j}" ${answered ? 'disabled' : ''}>${esc(o[2])}</button>`).join('')}</div>`;
   } else {
     body = `<div class="muted small">Как сказать по-китайски?</div>
       <div class="prompt" style="margin:8px 0">${esc(t.ex[2])}</div>
@@ -325,10 +355,11 @@ function lsHomework(head) {
   const solution = answered ? `<div class="example"><div class="answer ${ls.hwState ? 'ok' : 'bad'}">${ls.hwState ? '✅ Верно!' : '❌ Правильно так:'}</div>
       <div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:22px">${esc(t.ex[0])}</div><div class="py small">${colorPinyin(t.ex[1])}</div><div class="small">${esc(t.ex[2])}</div></div>${playBtn(t.ex[0])}</div></div>` : '';
   app.innerHTML = `${head}
-    <div class="muted small" style="margin-bottom:6px">Тема: <b>${esc(g.title)}</b> · задание ${ls.i + 1} из ${ls.hw.length}</div>
+    <div class="muted small" style="margin-bottom:6px">Домашнее задание · ${ls.i + 1} из ${ls.hw.length}</div>
     <div class="card">${body}${solution}</div>
     <div class="row">${answered ? '<button class="btn primary big" id="next">Дальше →</button>'
       : t.type === 'order' ? `<button class="btn" id="reset">Сбросить</button><button class="btn primary" id="checkOrder" style="flex:1" ${t.picked.length === t.chunks.length ? '' : 'disabled'}>Проверить</button>` : ''}</div>`;
+  if (t.type === 'listen' && !answered && !t.played) { t.played = true; speak(t.ex[0]); }
   const finish = (ok) => { ls.hwState = ok; if (ok) ls.hwRight++; drawLesson(); speak(t.ex[0]); };
   app.querySelectorAll('[data-pk]').forEach((b) => { b.onclick = () => { t.picked.push(t.pool[+b.dataset.pk]); drawLesson(); }; });
   app.querySelectorAll('[data-un]').forEach((b) => { b.onclick = () => { t.picked.splice(+b.dataset.un, 1); drawLesson(); }; });
@@ -339,14 +370,14 @@ function lsHomework(head) {
   const nx = document.getElementById('next'); if (nx) nx.onclick = () => { ls.hwState = null; ls.i++; drawLesson(); };
 }
 
-/* 6. Итог */
+/* 7. Итог */
 function lsDone(head) {
-  const qTotal = ls.words.length, hTotal = ls.hw.length || 1;
-  const score = Math.round(((ls.quizRight / qTotal) * 0.6 + (ls.hwRight / hTotal) * 0.4) * 100);
+  const qTotal = ls.words.length || 1, hTotal = ls.hw.length || 1;
+  const score = Math.round(((ls.quizRight / qTotal) * 0.5 + (ls.hwRight / hTotal) * 0.5) * 100);
   if (!ls.saved) {
-    S.lessons = S.lessons || {};
-    const prev = S.lessons[ls.L.n];
-    S.lessons[ls.L.n] = { date: todayKey(), score: Math.max(score, prev ? prev.score : 0), quiz: `${ls.quizRight}/${qTotal}`, hw: `${ls.hwRight}/${ls.hw.length}` };
+    S.course = S.course || {};
+    const prev = S.course[ls.L.key];
+    S.course[ls.L.key] = { date: todayKey(), score: Math.max(score, prev ? prev.score : 0), quiz: `${ls.quizRight}/${ls.words.length}`, hw: `${ls.hwRight}/${ls.hw.length}` };
     save(); ls.saved = true;
   }
   const wrong = ls.quizWrong.map((id) => WORD_BY_ID[id]);
@@ -354,18 +385,18 @@ function lsDone(head) {
   app.innerHTML = `${head}
     <div class="card empty">
       <div class="big-emoji">${score >= 80 ? '🎉' : score >= 50 ? '👍' : '💪'}</div>
-      <h2>Урок ${ls.L.n} пройден — ${score}%</h2>
-      <p>Слова с первой попытки: <b>${ls.quizRight}/${qTotal}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}</p>
+      <h2>${lessonName(ls.L)} пройден — ${score}%</h2>
+      <p>Слова с первой попытки: <b>${ls.quizRight}/${ls.words.length}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}</p>
       ${wrong.length ? `<p class="muted small">Повторите: ${wrong.map((w) => `<span class="hz">${esc(w.hz)}</span> (${esc(w.ru)})`).join(', ')}. Эти слова придут в карточки раньше.</p>` : ''}
-      <p class="muted small">Слова урока добавлены в карточки — завтра загляните в «Карточки», чтобы их повторить.</p>
+      <p class="muted small">Слова урока добавлены в карточки — завтра загляните в «Карточки», чтобы их повторить. Перед следующим уроком перечитайте диалог вслух.</p>
       <div class="row" style="justify-content:center">
         <button class="btn" id="redo">Пройти ещё раз</button>
-        ${next ? `<a class="btn primary" href="#/lessons/${next.n}">Урок ${next.n} →</a>` : ''}
+        ${next ? `<a class="btn primary" href="#/lessons/${next.n}">Следующий урок →</a>` : ''}
       </div>
     </div>`;
   document.getElementById('redo').onclick = () => { startLesson(ls.L.n); router(); };
 }
 document.addEventListener('keydown', (e) => {
-  if (location.hash !== '#/lessons/go' || !ls || e.key !== 'Enter' || e.target.matches('input,button,select,textarea')) return;
+  if (location.hash !== '#/lessons/go' || !ls || e.key !== 'Enter' || e.isComposing || e.target.matches('input,button,select,textarea')) return;
   const nx = document.getElementById('next'); if (nx) { e.preventDefault(); nx.click(); }
 });

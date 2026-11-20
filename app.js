@@ -2,12 +2,13 @@
 
 /* ================= Данные ================= */
 const _seen = new Set();
+function extraWords(l) { return typeof COURSE_EXTRA !== 'undefined' && COURSE_EXTRA[l] ? '\n' + COURSE_EXTRA[l].trim() : ''; }
 function uniq(list) { return list.filter((w) => { const k = w.hz + '|' + plain(w.py).replace(/\s/g, ''); return !_seen.has(k) && _seen.add(k); }); }
 const DECKS = {
-  hsk1: { name: 'HSK 1', level: 1, words: uniq(parseWords(HSK1, 'hsk1')) },
-  hsk2: { name: 'HSK 2', level: 2, words: uniq(parseWords(HSK2, 'hsk2')) },
-  hsk3: { name: 'HSK 3', level: 3, words: uniq(parseWords(HSK3, 'hsk3')) },
-  hsk4: { name: 'HSK 4', level: 4, words: uniq(parseWords(HSK4, 'hsk4')) },
+  hsk1: { name: 'HSK 1', level: 1, words: uniq(parseWords(HSK1 + extraWords(1), 'hsk1')) },
+  hsk2: { name: 'HSK 2', level: 2, words: uniq(parseWords(HSK2 + extraWords(2), 'hsk2')) },
+  hsk3: { name: 'HSK 3', level: 3, words: uniq(parseWords(HSK3 + extraWords(3), 'hsk3')) },
+  hsk4: { name: 'HSK 4', level: 4, words: uniq(parseWords(HSK4 + extraWords(4), 'hsk4')) },
   life: { name: 'Жизнь в Китае', words: uniq(parseWords(LIFE, 'life')) },
   phr: {
     name: 'Фразы',
@@ -36,6 +37,7 @@ const DEFAULT_STATE = {
     voice: '',
     autoplay: true,
     showPinyin: true,
+    hanziOnly: true,  // ответ только иероглифами (набор на китайской клавиатуре)
   },
   tones: { right: 0, total: 0, best: 0 },
 };
@@ -49,6 +51,7 @@ function load() {
 }
 let S = load();
 if (!S.typeMigrated) { S.settings.mode = 'type'; S.typeMigrated = true; }
+if (!S.hanziMigrated) { S.settings.hanziOnly = true; S.hanziMigrated = true; }
 if (!S.lessonsMigrated) { S.settings.newPerDay = 0; S.lessonsMigrated = true; }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* приватный режим */ }
@@ -250,12 +253,7 @@ function renderHome() {
       <div class="card stat"><b>${t.rev}</b><span>повторено сегодня</span></div>
       <div class="card stat"><b>${learned}</b><span>слов в изучении</span></div>
     </div>
-    ${(() => { const L = course()[nextLessonN() - 1]; return `<div class="card next-lesson">
-      <div class="muted small">Следующий урок · ${DECKS[L.deck].name}</div>
-      <h2 style="margin:4px 0 6px">Урок ${L.n}</h2>
-      <div class="small">${lessonSummary(L)}</div>
-      <a href="#/lessons/${L.n}" class="btn primary big" style="margin-top:12px">Начать урок →</a>
-    </div>`; })()}
+    ${nextLessonCard()}
     <div class="card">
       <h3>Повторение карточек</h3>
       <p class="muted small" style="margin:0 0 12px">${due ? `К повторению: <b>${due}</b>. ` : ''}${nw ? `Новых слов: <b>${nw}</b>.` : ''}${!due && !nw ? 'Карточек на сегодня нет. Новые слова приходят из уроков.' : ''}</p>
@@ -395,7 +393,7 @@ function renderTypeCard(w) {
         <div id="recres" class="rec-result"></div>
         ${ex ? `<div class="example"><div class="small muted">Пример</div><div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
       ` : `
-        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Иероглифы или пиньинь">
+        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ansPlaceholder()}">
         <div id="fb" class="rec-result bad">${tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
         <div class="row" style="justify-content:center"><button class="btn primary" id="check">Проверить</button><button class="btn" id="giveup">Не помню</button></div>`}
     </div>
@@ -407,9 +405,9 @@ function renderTypeCard(w) {
     const check = () => {
       if (!inp.value.trim()) return;
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) { session.tstate = 'right'; renderLearn(); }
-      else { session.ttries = tries + 1; document.getElementById('fb').textContent = '❌ Неверно, попробуйте ещё раз'; inp.select(); }
+      else { session.ttries = tries + 1; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
     };
-    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); check(); } };
+    inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
     document.getElementById('giveup').onclick = () => { session.ttries = tries + 1; session.tstate = 'shown'; renderLearn(); };
   } else {
@@ -454,6 +452,7 @@ const EX_CORPUS = [
   ...Object.values(EXAMPLES),
   ...SITUATIONS.flatMap((s) => s.phrases.map((p) => [p[0], p[1], p[2]])),
   ...ALL_GRAMMAR.flatMap((g) => g.ex),
+  ...(typeof COURSE !== 'undefined' ? COURSE.flatMap((L) => [...L.gram.flatMap((g) => g.ex), ...L.dlg.map((d) => d.slice(1))]) : []),
 ].filter((e) => !e[0].includes('…'));
 function exampleFor(w) {
   if (w.deck === 'phr') return null;
@@ -471,10 +470,15 @@ function checkAnswer(input, w) {
   const raw = input.trim();
   if (!raw) return false;
   if (/[一-鿿]/.test(raw)) return normHz(raw) === normHz(w.hz);
+  if (S.settings.hanziOnly) return false;
   const inp = raw.toLowerCase().replace(/v/g, 'u').replace(/ü/g, 'u').replace(/[\s'’.,!?。，！？…—-]/g, '');
   if (/\d/.test(inp)) return inp.replace(/[05]/g, '') === numberedPinyin(w.py);
   return plain(inp) === plain(w.py).replace(/[\s'’.,!?。，！？…—-]/g, '');
 }
+function wrongMsg(input) {
+  return S.settings.hanziOnly && !/[一-鿿]/.test(input) ? '⌨️ Нужны иероглифы: наберите пиньинь на китайской клавиатуре и выберите нужный иероглиф' : '❌ Неверно, попробуйте ещё раз';
+}
+function ansPlaceholder() { return S.settings.hanziOnly ? 'Иероглифами (китайская клавиатура)' : 'Иероглифы или пиньинь'; }
 function dayLabel(key) {
   if (key === todayKey()) return 'Сегодня';
   const y = new Date(); y.setDate(y.getDate() - 1);
@@ -570,7 +574,7 @@ function drawReviewCard() {
         ${ex ? `<div class="example"><div class="small muted">Пример</div>
           <div class="row" style="gap:10px;justify-content:center;flex-wrap:nowrap"><div style="text-align:left"><div class="hz" style="font-size:22px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : ''}
       ` : `
-        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Иероглифы или пиньинь">
+        <input class="search answer-input" id="ans" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ansPlaceholder()}">
         <div id="fb" class="rec-result">${rv.tries ? '❌ Неверно, попробуйте ещё раз' : ''}</div>
         <div class="row" style="justify-content:center">
           <button class="btn primary" id="check">Проверить</button>
@@ -585,9 +589,9 @@ function drawReviewCard() {
     const check = () => {
       if (!inp.value.trim()) return;
       if (checkAnswer(inp.value, w) || ALL_WORDS.some((o) => o.ru === w.ru && o !== w && checkAnswer(inp.value, o))) { if (!rv.tries) rv.right++; rv.state = 'right'; finishWord(w); }
-      else { rv.tries++; document.getElementById('fb').className = 'rec-result bad'; document.getElementById('fb').textContent = '❌ Неверно, попробуйте ещё раз'; inp.select(); }
+      else { rv.tries++; document.getElementById('fb').className = 'rec-result bad'; document.getElementById('fb').textContent = wrongMsg(inp.value); inp.select(); }
     };
-    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); check(); } };
+    inp.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); check(); } };
     document.getElementById('check').onclick = check;
     document.getElementById('giveup').onclick = () => { rv.tries++; rv.state = 'shown'; finishWord(w); };
   } else {
@@ -815,6 +819,8 @@ function renderSettings() {
       </div>
       <label class="check"><input type="checkbox" id="sp" ${st.showPinyin ? 'checked' : ''}> Показывать пиньинь сразу</label>
       <label class="check"><input type="checkbox" id="ap" ${st.autoplay ? 'checked' : ''}> Автоматически озвучивать</label>
+      <label class="check"><input type="checkbox" id="ho" ${st.hanziOnly ? 'checked' : ''}> Отвечать только иероглифами</label>
+      <p class="muted small">Тренирует набор на телефоне: печатаете пиньинь на китайской клавиатуре и выбираете нужный иероглиф (как в WeChat). Выключите, чтобы принимался и пиньинь.</p>
     </div>
     <div class="card">
       <div class="field"><label class="lbl" for="vc">Голос</label>
@@ -838,6 +844,7 @@ function renderSettings() {
   app.querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { st.mode = b.dataset.m; save(); renderSettings(); }; });
   document.getElementById('sp').onchange = (e) => { st.showPinyin = e.target.checked; save(); };
   document.getElementById('ap').onchange = (e) => { st.autoplay = e.target.checked; save(); };
+  document.getElementById('ho').onchange = (e) => { st.hanziOnly = e.target.checked; save(); };
   document.getElementById('vc').onchange = (e) => { st.voice = e.target.value; save(); };
   document.getElementById('rt').oninput = (e) => { st.rate = +e.target.value; document.getElementById('rtv').textContent = st.rate; save(); };
   document.getElementById('exp').onclick = () => {
@@ -865,9 +872,16 @@ window.addEventListener('beforeinstallprompt', (e) => {
 window.addEventListener('appinstalled', () => { installPrompt = null; toast('Приложение установлено 🎉'); });
 function isStandalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone; }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').then(() => {
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(() => {
     try { if (!localStorage.getItem('zh-offline-ok')) { localStorage.setItem('zh-offline-ok', '1'); toast('Сайт сохранён для работы без интернета'); } } catch (e) { /* ничего */ }
   }).catch(() => {});
+}
+if ('serviceWorker' in navigator) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) { toast('Сайт обновлён'); setTimeout(() => location.reload(), 600); }
+    hadController = true;
+  });
 }
 document.addEventListener('click', (e) => {
   if (e.target.closest('#installBtn') && installPrompt) { installPrompt.prompt(); installPrompt.userChoice.finally(() => { installPrompt = null; router(); }); }

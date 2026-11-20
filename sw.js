@@ -1,13 +1,18 @@
 // Офлайн-кэш: сайт работает без интернета после первого открытия.
-// При изменении файлов увеличивайте VERSION, чтобы телефоны получили обновление.
-const VERSION = 'zh-daily-v5';
+// Когда есть интернет — всегда берём свежую версию с сервера (обновления приходят сразу),
+// без интернета — отдаём сохранённую копию.
+const VERSION = 'zh-daily-v7';
 const FILES = [
-  './', 'index.html', 'style.css', 'data.js', 'data-hsk34.js', 'examples.js', 'lessons.js', 'app.js',
+  './', 'index.html', 'style.css', 'data.js', 'data-hsk34.js', 'examples.js', 'course-hsk1.js', 'course-hsk2.js', 'course-hsk3.js', 'course-hsk4.js', 'lessons.js', 'app.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -18,16 +23,16 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Сначала из кэша (мгновенно и офлайн), параллельно тихо обновляем кэш из сети.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
-  e.respondWith(
-    caches.open(VERSION).then(async (cache) => {
-      const cached = await cache.match(e.request, { ignoreSearch: true });
-      const network = fetch(e.request)
-        .then((res) => { if (res && res.ok) cache.put(e.request, res.clone()); return res; })
-        .catch(() => null);
-      return cached || (await network) || cache.match('index.html');
-    })
-  );
+  e.respondWith((async () => {
+    const cache = await caches.open(VERSION);
+    try {
+      const res = await fetch(e.request, { cache: 'no-cache' });
+      if (res && res.ok) cache.put(e.request, res.clone());
+      return res;
+    } catch (err) {
+      return (await cache.match(e.request, { ignoreSearch: true })) || (await cache.match('index.html'));
+    }
+  })());
 });
