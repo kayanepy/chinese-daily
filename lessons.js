@@ -108,8 +108,9 @@ function renderLessonInfo(n) {
       <div class="muted small">${lessonName(L)} · урок ${L.n} из ${course().length}</div>
       <h1 style="margin:4px 0 0"><span class="hz">${esc(L.zh)}</span> ${playBtn(L.zh)}</h1>
       <div class="muted">${esc(L.ru)}</div>
-      <div style="margin-top:10px">${st ? `<span class="pill ok">✓ Пройден ${dayLabel(st.date).toLowerCase()} · ${st.score}% · слова ${st.quiz} · домашка ${st.hw}</span>` : '<span class="pill">Ещё не пройден</span>'}</div>
+      <div style="margin-top:10px">${st ? `<span class="pill ok">✓ Пройден ${dayLabel(st.date).toLowerCase()} · ${st.score}% · слова ${st.quiz} · домашка ${st.hw}${st.speak != null ? ` · произношение ${st.speak}%` : ''}</span>` : '<span class="pill">Ещё не пройден</span>'}</div>
       <a class="btn primary big" href="#/lessons/${L.n}" style="margin-top:12px">${st ? 'Пройти ещё раз' : 'Начать урок'} →</a>
+      <button class="btn" id="rvl" style="margin-top:8px;width:100%">🔁 Повторить слова этого урока</button>
     </div>
     <div class="card">
       <h3 style="margin-top:0">Слова · ${learn}/${words.length} в карточках</h3>
@@ -126,12 +127,13 @@ function renderLessonInfo(n) {
       ${L.dlg.map((x) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div><div class="py">${colorPinyin(x[2])}</div><div class="ru">${esc(x[3])}</div></div><div class="tools">${playBtn(x[1])}</div></div>`).join('')}
     </div>`;
   document.getElementById('all').onclick = () => speakQueue(L.dlg.map((x) => x[1]));
+  document.getElementById('rvl').onclick = () => startReview({ name: `${lessonName(L)} · ${L.zh}`, words: words });
 }
 
 /* ---------- Прохождение урока ---------- */
 let ls = null;
 const STEPS = [
-  ['words', '📖 Слова'], ['dialog', '💬 Диалог'], ['grammar', '📘 Грамматика'], ['tones', '🎵 Тоны'], ['quiz', '✍️ Проверка слов'], ['hw', '📝 Домашка'], ['done', '🏁 Итог'],
+  ['words', '📖 Слова'], ['dialog', '💬 Диалог'], ['grammar', '📘 Грамматика'], ['tones', '🎵 Тоны'], ['speak', '🎤 Произношение'], ['quiz', '✍️ Проверка слов'], ['hw', '📝 Домашка'], ['done', '🏁 Итог'],
 ];
 const STEP = Object.fromEntries(STEPS.map(([k], i) => [k, i]));
 function startLesson(n) {
@@ -141,6 +143,7 @@ function startLesson(n) {
   ls = {
     L, words, step: 0, i: 0, showRu: false, showPy: true,
     tones: makeToneQs(words), toneRight: 0,
+    speak: makeSpeakQs(L, words), speakSkipped: false,
     quiz: shuffle(words.map((w) => w.id)), quizRight: 0, quizWrong: [], tries: 0, state: 'ask', retried: {},
     hw: makeHomework(L), hwRight: 0, hwState: null,
   };
@@ -154,7 +157,7 @@ function drawLesson() {
   if (!ls) { location.hash = '#/lessons'; return; }
   const key = STEPS[ls.step][0];
   const head = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><a href="#/lessons" class="small">← Уроки</a><b class="small">${lessonName(ls.L)}</b></div>${stepBar()}`;
-  ({ words: lsWords, dialog: lsDialog, grammar: lsGrammar, tones: lsTones, quiz: lsQuiz, hw: lsHomework, done: lsDone })[key](head);
+  ({ words: lsWords, dialog: lsDialog, grammar: lsGrammar, tones: lsTones, speak: lsSpeak, quiz: lsQuiz, hw: lsHomework, done: lsDone })[key](head);
 }
 function exampleBox(ex, title) {
   return ex ? `<div class="example">${title ? `<div class="small muted">${title}</div>` : ''}<div class="row" style="gap:10px;flex-wrap:nowrap"><div style="flex:1"><div class="hz" style="font-size:20px">${esc(ex[0])}</div><div class="py small">${colorPinyin(ex[1])}</div><div class="small">${esc(ex[2])}</div></div>${playBtn(ex[0])}</div></div>` : '';
@@ -180,9 +183,10 @@ function lsWords(head) {
       <div class="hz">${esc(w.hz)}</div>
       <div class="py">${colorPinyin(w.py)}</div>
       <div class="ru">${esc(w.ru)}</div>
-      <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button></div>
+      <div class="row" style="justify-content:center">${playBtn(w.hz)}<button class="btn sm" data-say="${esc(w.hz)}" data-rate="0.5">🐢 медленно</button>${SR ? '<button class="btn sm" id="mic">🎤 Скажите</button>' : ''}</div>
+      <div id="recres" class="rec-result" style="text-align:center"></div>
       ${exampleBox(exampleFor(w), 'Пример')}
-      <p class="hint">Повторите вслух 2–3 раза.</p>
+      <p class="hint">Повторите вслух 2–3 раза${SR ? ', затем нажмите 🎤 и скажите слово — сайт проверит произношение' : ''}.</p>
     </div>
     <div class="row">
       ${ls.i ? '<button class="btn" id="prev">← Назад</button>' : ''}
@@ -194,6 +198,8 @@ function lsWords(head) {
     if (ls.i < ls.words.length - 1) { ls.i++; drawLesson(); } else goStep(STEP.dialog);
   };
   const pv = document.getElementById('prev'); if (pv) pv.onclick = () => { ls.i--; drawLesson(); };
+  const mic = document.getElementById('mic');
+  if (mic) mic.onclick = () => micCheck(w.hz, document.getElementById('recres'), mic);
 }
 
 /* 2. Диалог */
@@ -209,14 +215,15 @@ function lsDialog(head) {
         <button class="btn sm" id="tpy">${ls.showPy ? 'Скрыть' : 'Показать'} пиньинь</button>
         <button class="btn sm" id="tru">${ls.showRu ? 'Скрыть' : 'Показать'} перевод</button>
       </div>
-      ${d.map((x) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div>${ls.showPy ? `<div class="py">${colorPinyin(x[2])}</div>` : ''}<div class="ru ${ls.showRu ? '' : 'blur'}">${esc(x[3])}</div></div><div class="tools">${playBtn(x[1])}</div></div>`).join('')}
-      <p class="hint">Сначала послушайте, не глядя в перевод: сколько поняли? Затем нажмите на перевод (или «Показать перевод»), проверьте себя и прочитайте каждую реплику вслух.</p>
+      ${d.map((x, k) => `<div class="phrase dlg"><span class="who">${esc(x[0])}</span><div class="body"><div class="hz">${esc(x[1])}</div>${ls.showPy ? `<div class="py">${colorPinyin(x[2])}</div>` : ''}<div class="ru ${ls.showRu ? '' : 'blur'}">${esc(x[3])}</div><div class="rec-result" id="dr${k}"></div></div><div class="tools">${playBtn(x[1])}${SR ? `<button class="play" data-mic="${k}" title="Проверить произношение">🎤</button>` : ''}</div></div>`).join('')}
+      <p class="hint">Сначала послушайте, не глядя в перевод: сколько поняли? Затем нажмите на перевод (или «Показать перевод»), проверьте себя и прочитайте каждую реплику вслух${SR ? ' — кнопка 🎤 проверит, как вы её произнесли' : ''}.</p>
     </div>
     <div class="row"><button class="btn" id="prev">← Слова</button><button class="btn primary" id="next" style="flex:1">К грамматике →</button></div>`;
   document.getElementById('all').onclick = () => speakQueue(d.map((x) => x[1]));
   document.getElementById('tpy').onclick = () => { ls.showPy = !ls.showPy; drawLesson(); };
   document.getElementById('tru').onclick = () => { ls.showRu = !ls.showRu; drawLesson(); };
   app.querySelectorAll('.ru.blur').forEach((el) => { el.onclick = () => el.classList.remove('blur'); });
+  app.querySelectorAll('[data-mic]').forEach((b) => { b.onclick = () => micCheck(d[+b.dataset.mic][1], document.getElementById('dr' + b.dataset.mic), b); });
   document.getElementById('prev').onclick = () => { ls.step = STEP.words; ls.i = ls.words.length - 1; drawLesson(); };
   document.getElementById('next').onclick = () => goStep(STEP.grammar);
 }
@@ -270,7 +277,7 @@ function lsTones(head) {
     </div>
     <div class="row">
       <button class="btn" id="skip">Пропустить тоны</button>
-      ${q.chosen ? `<button class="btn primary" id="next" style="flex:1">${ls.i < ls.tones.length - 1 ? 'Дальше →' : 'К проверке слов →'}</button>` : ''}
+      ${q.chosen ? `<button class="btn primary" id="next" style="flex:1">${ls.i < ls.tones.length - 1 ? 'Дальше →' : 'К произношению →'}</button>` : ''}
     </div>`;
   if (!q.chosen) speak(q.w.hz);
   app.querySelectorAll('[data-opt]').forEach((b) => { b.onclick = () => {
@@ -278,12 +285,63 @@ function lsTones(head) {
     S.tones.total++; if (q.chosen === q.right) S.tones.right++; save();
     drawLesson(); speak(q.w.hz);
   }; });
-  document.getElementById('skip').onclick = () => { ls.tonesSkipped = true; goStep(STEP.quiz); };
+  document.getElementById('skip').onclick = () => { ls.tonesSkipped = true; goStep(STEP.speak); };
   const nx = document.getElementById('next');
-  if (nx) nx.onclick = () => { if (ls.i < ls.tones.length - 1) { ls.i++; drawLesson(); } else goStep(STEP.quiz); };
+  if (nx) nx.onclick = () => { if (ls.i < ls.tones.length - 1) { ls.i++; drawLesson(); } else goStep(STEP.speak); };
 }
 
-/* 5. Проверка слов (ввод) */
+/* 5. Произношение: говорите слова и короткие реплики диалога, распознавание сравнивает с образцом */
+function makeSpeakQs(L, words) {
+  const ws = shuffle([...words]).slice(0, 8).map((w) => ({ hz: w.hz, py: w.py, ru: w.ru }));
+  const lines = shuffle(L.dlg.filter((x) => [...normHz(x[1])].length <= 12)).slice(0, 4).map((x) => ({ hz: x[1], py: x[2], ru: x[3], line: true }));
+  return [...ws, ...lines];
+}
+function speakAvg() {
+  const done = ls.speak.filter((q) => q.best != null);
+  return done.length ? Math.round(done.reduce((a, q) => a + q.best, 0) / done.length) : null;
+}
+function lsSpeak(head) {
+  if (!SR) {
+    app.innerHTML = `${head}<div class="card"><h2 style="margin-top:0">🎤 Произношение</h2>
+      <p>Этот браузер не умеет распознавать речь. Откройте сайт в Chrome (Android) или Safari (iPhone) и разрешите доступ к микрофону.</p>
+      <p class="muted small">Распознавание работает через сервис Google/Apple, поэтому нужен интернет (в Китае — с VPN).</p></div>
+      <button class="btn primary big" id="next">К проверке слов →</button>`;
+    document.getElementById('next').onclick = () => { ls.speakSkipped = true; goStep(STEP.quiz); };
+    return;
+  }
+  const q = ls.speak[ls.i];
+  const last = ls.i === ls.speak.length - 1;
+  app.innerHTML = `${head}
+    <div class="progress"><div style="width:${(ls.i / ls.speak.length) * 100}%"></div></div>
+    <div class="card flash">
+      <span class="deck-tag" style="align-self:center">${ls.i + 1} / ${ls.speak.length} · ${q.line ? 'реплика из диалога' : 'слово'}</span>
+      <div class="hz" ${q.line ? 'style="font-size:30px"' : ''}>${esc(q.hz)}</div>
+      <div class="py">${colorPinyin(q.py)}</div>
+      <div class="ru">${esc(q.ru)}</div>
+      <div class="row" style="justify-content:center">${playBtn(q.hz)}<button class="btn sm" data-say="${esc(q.hz)}" data-rate="0.5">🐢</button></div>
+      <button class="btn primary big" id="mic" style="margin-top:10px">🎤 ${q.best != null ? 'Ещё раз' : 'Нажмите и скажите'}</button>
+      <div id="recres" class="rec-result" style="text-align:center"></div>
+      ${q.best != null ? `<div class="small muted" style="text-align:center">Лучший результат: <b>${q.best}%</b></div>` : ''}
+    </div>
+    <div class="row">
+      <button class="btn" id="skip">Пропустить произношение</button>
+      <button class="btn ${q.best != null ? 'primary' : ''}" id="next" style="flex:1">${last ? 'К проверке слов →' : q.best != null ? 'Дальше →' : 'Пропустить →'}</button>
+    </div>
+    <p class="hint">Послушайте образец, нажмите 🎤 и скажите вслух. 80% и выше — отлично. Если сервис распознал не то, попробуйте говорить чуть медленнее и чётче выделять тоны.</p>`;
+  const mic = document.getElementById('mic');
+  mic.onclick = () => micCheck(q.hz, document.getElementById('recres'), mic, (pct) => {
+    const first = q.best == null;
+    q.best = Math.max(q.best || 0, pct);
+    if (first || pct >= q.best) {
+      mic.textContent = '🎤 Ещё раз';
+      const nx = document.getElementById('next'); nx.classList.add('primary'); nx.textContent = last ? 'К проверке слов →' : 'Дальше →';
+    }
+  });
+  document.getElementById('skip').onclick = () => { ls.speakSkipped = true; goStep(STEP.quiz); };
+  document.getElementById('next').onclick = () => { if (!last) { ls.i++; drawLesson(); } else goStep(STEP.quiz); };
+}
+
+/* 6. Проверка слов (ввод) */
 function lsQuiz(head) {
   if (!ls.quiz.length) return goStep(STEP.hw);
   const w = WORD_BY_ID[ls.quiz[0]];
@@ -334,7 +392,7 @@ function lsQuiz(head) {
   }
 }
 
-/* 6. Домашнее задание — в духе рабочей тетради HSK:
+/* 7. Домашнее задание — в духе рабочей тетради HSK:
    аудирование, выбор слова для пропуска, грамматика, порядок слов, перевод */
 function hzOnly(s) { return [...s].filter((c) => /[一-鿿]/.test(c)); }
 function chunkSentence(ex) {
@@ -438,14 +496,14 @@ function lsHomework(head) {
   const nx = document.getElementById('next'); if (nx) nx.onclick = () => { ls.hwState = null; ls.i++; drawLesson(); };
 }
 
-/* 7. Итог */
+/* 8. Итог */
 function lsDone(head) {
   const qTotal = ls.words.length || 1, hTotal = ls.hw.length || 1;
   const score = Math.round(((ls.quizRight / qTotal) * 0.5 + (ls.hwRight / hTotal) * 0.5) * 100);
   if (!ls.saved) {
     S.course = S.course || {};
     const prev = S.course[ls.L.key];
-    S.course[ls.L.key] = { date: todayKey(), score: Math.max(score, prev ? prev.score : 0), quiz: `${ls.quizRight}/${ls.words.length}`, hw: `${ls.hwRight}/${ls.hw.length}` };
+    S.course[ls.L.key] = { date: todayKey(), score: Math.max(score, prev ? prev.score : 0), quiz: `${ls.quizRight}/${ls.words.length}`, hw: `${ls.hwRight}/${ls.hw.length}`, speak: speakAvg() != null ? Math.max(speakAvg(), (prev && prev.speak) || 0) : (prev ? prev.speak : undefined) };
     save(); ls.saved = true;
   }
   const wrong = ls.quizWrong.map((id) => WORD_BY_ID[id]);
@@ -454,7 +512,7 @@ function lsDone(head) {
     <div class="card empty">
       <div class="big-emoji">${score >= 80 ? '🎉' : score >= 50 ? '👍' : '💪'}</div>
       <h2>${lessonName(ls.L)} пройден — ${score}%</h2>
-      <p>Слова с первой попытки: <b>${ls.quizRight}/${ls.words.length}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}</p>
+      <p>Слова с первой попытки: <b>${ls.quizRight}/${ls.words.length}</b> · Домашка: <b>${ls.hwRight}/${ls.hw.length}</b>${ls.tonesSkipped ? '' : ` · Тоны: <b>${ls.toneRight}/${ls.tones.length}</b>`}${speakAvg() != null ? ` · Произношение: <b>${speakAvg()}%</b>` : ''}</p>
       ${wrong.length ? `<p class="muted small">Повторите: ${wrong.map((w) => `<span class="hz">${esc(w.hz)}</span> (${esc(w.ru)})`).join(', ')}. Эти слова придут в карточки раньше.</p>` : ''}
       <p class="muted small">Слова урока добавлены в карточки — завтра загляните в «Карточки», чтобы их повторить. Перед следующим уроком перечитайте диалог вслух.</p>
       <div class="row" style="justify-content:center">

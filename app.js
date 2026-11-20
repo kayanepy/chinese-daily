@@ -441,7 +441,7 @@ document.addEventListener('keydown', (e) => {
   else if (session.revealed && ['1', '2', '3', '4'].includes(e.key)) answer(+e.key - 1);
 });
 
-function micCheck(target, out, btn) {
+function micCheck(target, out, btn, onScore) {
   out.className = 'rec-result'; out.textContent = '🎙 Говорите...';
   if (btn) btn.disabled = true;
   listen((alts) => {
@@ -450,6 +450,7 @@ function micCheck(target, out, btn) {
     const pct = Math.round(best.s * 100);
     out.className = 'rec-result ' + (pct >= 80 ? 'ok' : 'bad');
     out.innerHTML = `${pct >= 80 ? '✅ Отлично!' : pct >= 50 ? '🟡 Почти' : '❌ Не похоже'} Распознано: <span class="hz">${esc(best.a)}</span> (${pct}%)`;
+    if (onScore) onScore(pct);
   }, (err) => { if (btn) btn.disabled = false; out.className = 'rec-result bad'; out.textContent = err; });
 }
 
@@ -511,6 +512,9 @@ function reviewSets() {
   SITUATIONS.forEach((s) => {
     sets['sit:' + s.id] = { name: `${s.icon} ${s.title}`, words: DECKS.phr.words.filter((w) => w.sit === s.title) };
   });
+  if (typeof course === 'function') course().forEach((L) => {
+    sets['lesson:' + L.key] = { name: `${lessonName(L)} · ${L.zh}`, words: L.ids.map((id) => WORD_BY_ID[id]), L };
+  });
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
   sets.hard = { name: 'Трудные слова', words: started.filter((w) => S.cards[w.id].lapses > 0 || S.cards[w.id].ef < 2.3) };
   sets.week = { name: 'Изученные за 7 дней', words: started.filter((w) => S.cards[w.id].added >= todayKey(weekAgo)) };
@@ -534,6 +538,8 @@ function renderReview(arg) {
       <div class="seg" id="rsize">${[10, 20, 50, 0].map((n) => `<button data-n="${n}" class="${size === n ? 'on' : ''}">${n || 'все'}</button>`).join('')}</div></div>
     <h2>Особые</h2>
     <div class="chips">${['mistakes', 'hard', 'week', 'started'].map((k) => chip(k, sets[k])).join('')}</div>
+    <h2>По урокам</h2>
+    ${lessonReviewBox(sets)}
     <h2>По дням</h2>
     ${dayKeys.length ? `<div class="chips">${dayKeys.map((k) => chip(k, sets[k])).join('')}</div>` : '<p class="muted small">Здесь появятся дни занятий, как только вы пройдёте первые карточки во вкладке «Учить».</p>'}
     <h2>По уровням</h2>
@@ -542,6 +548,26 @@ function renderReview(arg) {
     <div class="chips">${SITUATIONS.map((s) => chip('sit:' + s.id, sets['sit:' + s.id])).join('')}</div>`;
   app.querySelectorAll('#rsize [data-n]').forEach((b) => { b.onclick = () => { S.settings.reviewSize = +b.dataset.n; save(); renderReview(); }; });
   app.querySelectorAll('[data-set]').forEach((b) => { b.onclick = () => startReview(sets[b.dataset.set]); });
+  const lsel = document.getElementById('lsel');
+  if (lsel) {
+    const lgo = document.getElementById('lgo');
+    lsel.onchange = () => { try { localStorage.setItem('zh-review-lesson', lsel.value); } catch (e) { /* нет хранилища */ } };
+    lgo.onclick = () => startReview(sets[lsel.value]);
+  }
+}
+// Повтор слов конкретного урока: сначала пройденные/начатые уроки, остальные — ниже в списке.
+function lessonReviewBox(sets) {
+  if (typeof course !== 'function') return '';
+  const c = course();
+  const opened = c.filter((L) => lessonState(L) || L.ids.some((id) => S.cards[id]));
+  const recent = [...opened].sort((a, b) => ((lessonState(b) || {}).date || '').localeCompare((lessonState(a) || {}).date || '')).slice(0, 4);
+  let saved = null; try { saved = localStorage.getItem('zh-review-lesson'); } catch (e) { /* нет хранилища */ }
+  const cur = sets[saved] ? saved : 'lesson:' + (recent[0] || nextLesson()).key;
+  const opt = (L) => `<option value="lesson:${L.key}" ${'lesson:' + L.key === cur ? 'selected' : ''}>${lessonState(L) ? '✓' : L.ids.some((id) => S.cards[id]) ? '◐' : '○'} ${esc(lessonName(L))} · ${esc(L.zh)}</option>`;
+  const groups = [1, 2, 3, 4].map((lv) => `<optgroup label="HSK ${lv}">${c.filter((L) => L.lvl === lv).map(opt).join('')}</optgroup>`).join('');
+  return `${recent.length ? `<div class="chips">${recent.map((L) => chip('lesson:' + L.key, { name: `HSK${L.lvl} · ${L.num}${L.part ? '.' + L.part : ''} ${L.zh}`, words: sets['lesson:' + L.key].words })).join('')}</div>` : ''}
+    <div class="row lesson-pick"><select id="lsel" aria-label="Урок">${groups}</select><button class="btn primary" id="lgo">Повторить слова урока</button></div>
+    <p class="muted small" style="margin-top:4px">✓ пройден · ◐ слова уже в карточках · ○ ещё не начат</p>`;
 }
 function startReview(set) {
   const size = S.settings.reviewSize || 20;
