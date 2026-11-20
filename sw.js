@@ -1,7 +1,7 @@
 // Офлайн-кэш: сайт работает без интернета после первого открытия.
 // Когда есть интернет — всегда берём свежую версию с сервера (обновления приходят сразу),
 // без интернета — отдаём сохранённую копию.
-const VERSION = 'zh-daily-v8';
+const VERSION = 'zh-daily-v9';
 const FILES = [
   './', 'index.html', 'style.css', 'data.js', 'data-hsk34.js', 'examples.js', 'course-hsk1.js', 'course-hsk2.js', 'course-hsk3.js', 'course-hsk4.js', 'lessons.js', 'app.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',

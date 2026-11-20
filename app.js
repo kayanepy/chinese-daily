@@ -287,14 +287,22 @@ function renderHome() {
 }
 
 function levelBars() {
+  const next = nextLesson();
   return HSK_DECKS.map((k) => {
     const d = DECKS[k], n = d.words.length;
     const inL = d.words.filter((w) => S.cards[w.id]).length;
     const solid = d.words.filter((w) => S.cards[w.id] && S.cards[w.id].iv >= 21).length;
-    const off = d.level > S.settings.maxLevel;
-    return `<div class="lvl-row${off ? ' off' : ''}"><div class="row" style="justify-content:space-between"><b>${d.name}</b><span class="muted small">${inL} из ${n} начато · ${solid} выучено</span></div>
-      <div class="progress two"><div class="p-in" style="width:${(inL / n) * 100}%"></div><div class="p-solid" style="width:${(solid / n) * 100}%"></div></div></div>`;
-  }).join('') + '<p class="muted small" style="margin:4px 0 0">Новые слова идут по порядку: сначала HSK 1, потом 2, 3, 4. «Выучено» — слово держится в памяти 3+ недели.</p>';
+    const lessons = course().filter((L) => L.lvl === d.level);
+    const ld = lessons.filter(lessonState).length;
+    const here = next.lvl === d.level;
+    return `<details class="lvl-row path"${here ? ' open' : ''}><summary>
+      <div class="row" style="justify-content:space-between"><b>${d.name}${here ? ' <span class="pill ok">вы здесь</span>' : ''}</b><span class="muted small">уроки ${ld}/${lessons.length} · слова ${inL}/${n} · выучено ${solid}</span></div>
+      <div class="progress two"><div class="p-in" style="width:${(inL / n) * 100}%"></div><div class="p-solid" style="width:${(solid / n) * 100}%"></div></div></summary>
+      <div class="path-list">${lessons.map((L) => {
+        const st = lessonState(L), cur = L === next;
+        return `<a href="#/lessons/i${L.n}" class="path-item ${st ? 'done' : ''} ${cur ? 'cur' : ''}"><span class="mk">${st ? '✓' : cur ? '▶' : '○'}</span><span class="nm">${L.num}${L.part ? '.' + L.part : ''}. <span class="hz">${esc(L.zh)}</span> <small class="muted">${esc(L.ru)}</small></span><span class="sc">${st ? st.score + '%' : cur ? 'следующий' : ''}</span></a>`;
+      }).join('')}</div></details>`;
+  }).join('') + '<p class="muted small" style="margin:4px 0 0">Нажмите на уровень, чтобы раскрыть список уроков: ✓ пройден, ▶ следующий, ○ впереди. Нажмите на урок — откроется его содержание. «Выучено» — слово держится в памяти 3+ недели.</p>';
 }
 
 /* ---------- Карточки ---------- */
